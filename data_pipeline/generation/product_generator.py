@@ -343,13 +343,110 @@ def generate_product_variations():
         
         return list(set(variations))  # Remove duplicates
     
-    # Generate variations for all products  
-    for product_name, category in all_products:
-        variations_dict[product_name] = {
-            "variations": create_variations(product_name),
-            "category": category
+    def classify_product_type(product_name):
+        """Classify product into pricing and quantity categories based on keywords."""
+        product_lower = product_name.lower()
+        
+        # Price categories
+        if any(term in product_lower for term in ['iphone', 'macbook', 'samsung', 'gaming pc', 'drone']):
+            price_type = 'high_end_electronics'
+        elif any(term in product_lower for term in ['diamond', 'gold', 'luxury', 'premium']):
+            price_type = 'luxury'
+        elif any(term in product_lower for term in ['refrigerator', 'dishwasher', 'treadmill', 'sofa']):
+            price_type = 'appliances'
+        elif any(term in product_lower for term in ['cable', 'case', 'stickers', 'pen', 'nail polish']):
+            price_type = 'accessories'
+        else:
+            price_type = 'standard'
+        
+        # Quantity categories
+        if any(term in product_lower for term in ['laptop', 'phone', 'tv', 'sofa', 'refrigerator', 'car']):
+            quantity_type = 'single_item'
+        elif any(term in product_lower for term in ['jewelry', 'watch', 'camera', 'tablet']):
+            quantity_type = 'expensive_item'
+        elif any(term in product_lower for term in ['food', 'snack', 'pen', 'paper', 'battery']):
+            quantity_type = 'consumable'
+        elif any(term in product_lower for term in ['shirt', 'pants', 'shoes', 'dress', 'jacket']):
+            quantity_type = 'clothing'
+        else:
+            quantity_type = 'standard'
+        
+        return price_type, quantity_type
+    
+    def precompute_pricing_and_quantities(product_name, category, clean_data=False):
+        """Precompute price ranges and quantity options for a product."""
+        # Get base price range from category
+        min_price, max_price = CATEGORY_PRICE_RANGES.get(category, (10, 500))
+        
+        price_type, quantity_type = classify_product_type(product_name)
+        
+        # Adjust price ranges based on product type
+        if price_type == 'high_end_electronics':
+            min_price = max(min_price, 400)
+            max_price = max(max_price, 1500)
+        elif price_type == 'luxury':
+            min_price = max(min_price, 200)
+            max_price = max(max_price, 5000)
+        elif price_type == 'appliances':
+            min_price = max(min_price, 300)
+            max_price = max(max_price, 3000)
+        elif price_type == 'accessories':
+            max_price = min(max_price, 50)
+        
+        # Precompute quantity options based on type
+        if clean_data:
+            if quantity_type == 'single_item':
+                quantity_options = [1]
+                quantity_weights = [1.0]
+            elif quantity_type == 'expensive_item':
+                quantity_options = [1, 2]
+                quantity_weights = [0.8, 0.2]
+            elif quantity_type == 'consumable':
+                quantity_options = list(range(1, 6))
+                quantity_weights = [0.3, 0.25, 0.2, 0.15, 0.1]
+            elif quantity_type == 'clothing':
+                quantity_options = [1, 2, 3]
+                quantity_weights = [0.7, 0.2, 0.1]
+            else:  # standard
+                quantity_options = list(range(1, 6))
+                quantity_weights = [0.5, 0.25, 0.15, 0.07, 0.03]
+        else:
+            # Dirty data generation - include edge cases
+            if quantity_type == 'single_item':
+                quantity_options = [1, 2, 0, -1, 50, "two"]
+                quantity_weights = [0.75, 0.1, 0.05, 0.03, 0.04, 0.03]
+            elif quantity_type == 'consumable':
+                quantity_options = list(range(1, 11)) + [0, -1, 50, "many", "N/A"]
+                quantity_weights = [0.15, 0.13, 0.12, 0.10, 0.08, 0.07, 0.06, 0.05, 0.04, 0.03] + [0.05, 0.03, 0.03, 0.04, 0.02]
+            else:
+                quantity_options = list(range(1, 8)) + [0, -1, 50, "3.5", ""]
+                quantity_weights = [0.3, 0.2, 0.15, 0.1, 0.05, 0.03, 0.02] + [0.05, 0.03, 0.03, 0.02, 0.02]
+        
+        return {
+            'price_range': (min_price, max_price),
+            'price_type': price_type,
+            'quantity_options': quantity_options,
+            'quantity_weights': quantity_weights,
+            'quantity_type': quantity_type
         }
     
+    # Generate variations for all products with precomputed data
+    for product_name, category in all_products:
+        variations_list = create_variations(product_name)
+        
+        # Precompute for both clean and dirty data modes
+        clean_data_config = precompute_pricing_and_quantities(product_name, category, clean_data=True)
+        dirty_data_config = precompute_pricing_and_quantities(product_name, category, clean_data=False)
+        
+        variations_dict[product_name] = {
+            "variations": variations_list,
+            "category": category,
+            "clean_config": clean_data_config,
+            "dirty_config": dirty_data_config
+        }
+    
+    # Add cached product keys list for fast random selection
+    variations_dict['_product_keys'] = list(variations_dict.keys())
     
     return variations_dict
 

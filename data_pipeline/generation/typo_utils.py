@@ -46,11 +46,10 @@ def generate_typo(text: str, typo_probability: float = 0.1) -> str:
     
     result = text
     
-    # Apply random typos based on probability
-    for typo_type in typo_types:
-        if random.random() > typo_probability:
-            continue
-            
+    # Apply only one random typo instead of potentially all 9 types
+    if random.random() <= typo_probability:
+        typo_type = random.choice(typo_types)
+        
         if typo_type == 'fat_finger':
             # Hit adjacent key instead of intended key
             pos = random.randint(0, len(result) - 1)
