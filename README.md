@@ -47,7 +47,11 @@ uv run update-lookups data/input/dirty_1m.csv
 
 Each command writes a JSON file under `data/lookups/`, which doubles as a
 human-editable list—feel free to hand-fix or expand entries before the next
-cleaning run. The region map will mark uncertain values as `UNKNOWN`; review
+cleaning run. The repository ships with a starter `region_map.json` that
+captures the most common raw-to-canonical mappings we've encountered. When you
+run the generator against new data, any unmatched values are appended with the
+`UNKNOWN` label—review those rows, decide the correct canonical region (or leave
+them as `UNKNOWN` to force rejection), and rerun the cleaner.
 and adjust those rows before re-running the cleaner.
 
 ## Roadmap
