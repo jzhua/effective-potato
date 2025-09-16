@@ -1,0 +1,28 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "data-pipeline"
+version = "0.1.0"
+description = "CSV data processing pipeline with MapReduce"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "pandas>=2.2.0",
+    "pyarrow>=14.0.0",
+]
+
+[project.scripts]
+generate-data = "scripts.generate_data:main"
+clean-data = "scripts.clean_data:main"
+build-aggregations = "scripts.build_aggregations:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["data_pipeline", "scripts"]
+
+[tool.uv]
+dev-dependencies = [
+    "pytest",
+    "ruff",
+]
