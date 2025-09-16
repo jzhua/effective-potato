@@ -4,13 +4,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping, MutableSet
+import functools
+import json
 import logging
 import time
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from data_pipeline.settings import CLEAN_OUTPUT_DIR, REJECTED_OUTPUT_DIR, ensure_directories
+from data_pipeline.settings import CLEAN_OUTPUT_DIR, DATA_DIR, REJECTED_OUTPUT_DIR, ensure_directories
 
 # Common placeholder values that indicate a missing field.
 _NULLISH = {"", "null", "n/a", "na", "none", "-", "missing"}
@@ -60,6 +62,77 @@ _CATEGORY_ALIASES: Mapping[str, str] = {
     "supplies": "Office",
     "workspace": "Office",
 }
+
+_CATEGORY_ALIAS_LOOKUP = {key.casefold(): value for key, value in _CATEGORY_ALIASES.items()}
+
+_CATEGORY_LOOKUP_PATH = DATA_DIR / "lookups" / "common_categories.json"
+try:
+    with _CATEGORY_LOOKUP_PATH.open(encoding="utf-8") as fh:
+        _COMMON_CATEGORIES = json.load(fh)
+except FileNotFoundError:
+    _COMMON_CATEGORIES = []
+
+_CANONICAL_CATEGORIES = sorted({
+    *(_category for _category in _COMMON_CATEGORIES),
+    *_CATEGORY_ALIASES.values(),
+})
+
+_FUZZY_THRESHOLD = 2
+
+
+def _levenshtein(left: str, right: str, *, max_distance: int) -> int:
+    if left == right:
+        return 0
+    if not left:
+        return len(right)
+    if not right:
+        return len(left)
+    if abs(len(left) - len(right)) > max_distance:
+        return max_distance + 1
+
+    previous = list(range(len(right) + 1))
+    for i, l_char in enumerate(left, start=1):
+        current = [i]
+        min_distance = current[0]
+        for j, r_char in enumerate(right, start=1):
+            cost = 0 if l_char == r_char else 1
+            insert_cost = current[j - 1] + 1
+            delete_cost = previous[j] + 1
+            replace_cost = previous[j - 1] + cost
+            best_cost = min(insert_cost, delete_cost, replace_cost)
+            current.append(best_cost)
+            if best_cost < min_distance:
+                min_distance = best_cost
+        if min_distance > max_distance:
+            return max_distance + 1
+        previous = current
+    return previous[-1]
+
+
+@functools.lru_cache(maxsize=2048)
+def _resolve_category(value: str) -> str | None:
+    normalised = value.strip()
+    if not normalised:
+        return None
+    lowered = normalised.casefold()
+
+    if lowered in _CATEGORY_ALIAS_LOOKUP:
+        return _CATEGORY_ALIAS_LOOKUP[lowered]
+
+    best_match: str | None = None
+    best_distance = _FUZZY_THRESHOLD + 1
+    for candidate in _CANONICAL_CATEGORIES:
+        distance = _levenshtein(lowered, candidate.casefold(), max_distance=_FUZZY_THRESHOLD)
+        if distance < best_distance:
+            best_distance = distance
+            best_match = candidate
+        if best_distance == 0:
+            break
+
+    if best_match is not None and best_distance <= _FUZZY_THRESHOLD:
+        return best_match
+
+    return None
 
 _REGION_ALIASES: Mapping[str, str] = {
     "north america": "North America",
@@ -187,7 +260,8 @@ def _clean_chunk(frame: pd.DataFrame, seen_order_ids: MutableSet[str], config: C
     data = _reject_rows(valid_ids_mask, "missing_order_id_or_product")
 
     if data.empty:
-        rejected_df = pd.concat(rejected_rows, ignore_index=True) if rejected_rows else pd.DataFrame()
+        rejected_frames = [frame for frame in rejected_rows if not frame.empty]
+        rejected_df = pd.concat(rejected_frames, ignore_index=True) if rejected_frames else pd.DataFrame()
         return data, rejected_df
 
     # Step 2: Remove duplicates both within the chunk and across chunks seen so far.
@@ -199,7 +273,18 @@ def _clean_chunk(frame: pd.DataFrame, seen_order_ids: MutableSet[str], config: C
     data = _reject_rows(duplicate_mask, "duplicate_order_id")
 
     # Step 3: Standardise categorical features.
-    data["category"] = _map_alias(data.get("category"), _CATEGORY_ALIASES, "Misc")
+    raw_categories = _normalise_string(data.get("category")).replace(_NULLISH_REPLACEMENTS)
+    resolved_categories = [_resolve_category(value) for value in raw_categories.tolist()]
+    resolved_series = pd.Series(resolved_categories, index=data.index, dtype="object")
+    valid_category_mask = resolved_series.notna()
+    data = _reject_rows(valid_category_mask, "unknown_category")
+    if data.empty:
+        rejected_frames = [frame for frame in rejected_rows if not frame.empty]
+        rejected_df = pd.concat(rejected_frames, ignore_index=True) if rejected_frames else pd.DataFrame()
+        return data, rejected_df
+
+    resolved_series = resolved_series.astype("string")
+    data = data.assign(category=resolved_series.loc[data.index])
     data["region"] = _map_alias(data.get("region"), _REGION_ALIASES, "Other")
 
     # Step 4: Clean numeric fields and validate ranges.
@@ -242,10 +327,11 @@ def _clean_chunk(frame: pd.DataFrame, seen_order_ids: MutableSet[str], config: C
 
     if not data.empty:
         unix_sale_dates = (data["sale_date"].astype("int64") // 1_000_000_000).astype("Int64")
-        data.loc[:, "sale_date"] = unix_sale_dates
+        data = data.assign(sale_date=unix_sale_dates)
 
     if data.empty:
-        rejected_df = pd.concat(rejected_rows, ignore_index=True) if rejected_rows else pd.DataFrame()
+        rejected_frames = [frame for frame in rejected_rows if not frame.empty]
+        rejected_df = pd.concat(rejected_frames, ignore_index=True) if rejected_frames else pd.DataFrame()
         return data, rejected_df
 
     # Step 7: Clean emails and recompute revenue from the cleaned figures.
@@ -275,9 +361,22 @@ def _clean_chunk(frame: pd.DataFrame, seen_order_ids: MutableSet[str], config: C
     ]
     
     cleaned_data = data[columns] if not data.empty else data
-    rejected_df = pd.concat(rejected_rows, ignore_index=True) if rejected_rows else pd.DataFrame()
+    rejected_frames = [frame for frame in rejected_rows if not frame.empty]
+    rejected_df = pd.concat(rejected_frames, ignore_index=True) if rejected_frames else pd.DataFrame()
     
     return cleaned_data, rejected_df
+
+
+def _to_parquet_table(frame: pd.DataFrame) -> pa.Table:
+    """Normalise dtypes so pyarrow can serialise mixed data reliably."""
+    if frame.empty:
+        return pa.Table.from_pandas(frame, preserve_index=False)
+
+    converted = frame.convert_dtypes()
+    for column in converted.columns:
+        if str(converted[column].dtype) == "object":
+            converted[column] = converted[column].astype("string")
+    return pa.Table.from_pandas(converted, preserve_index=False)
 
 
 def clean_csv_to_parquet(
@@ -354,17 +453,17 @@ def clean_csv_to_parquet(
             
             # Write clean data
             if not cleaned.empty:
-                table = pa.Table.from_pandas(cleaned, preserve_index=False)
+                cleaned_table = _to_parquet_table(cleaned)
                 if writer is None:
-                    writer = pq.ParquetWriter(output_parquet, table.schema, compression="snappy")
-                    logger.info(f"Created parquet writer with schema: {len(table.schema)} columns")
-                
-                writer.write_table(table)
+                    writer = pq.ParquetWriter(output_parquet, cleaned_table.schema, compression="snappy")
+                    logger.info(f"Created parquet writer with schema: {len(cleaned_table.schema)} columns")
+
+                writer.write_table(cleaned_table)
                 chunks_processed += 1
-            
+
             # Write rejected data
             if not rejected.empty and cfg.save_rejected_rows:
-                rejected_table = pa.Table.from_pandas(rejected, preserve_index=False)
+                rejected_table = _to_parquet_table(rejected)
                 if rejected_writer is None:
                     rejected_writer = pq.ParquetWriter(rejected_parquet, rejected_table.schema, compression="snappy")
                     logger.info(f"Created rejected rows writer with schema: {len(rejected_table.schema)} columns")
