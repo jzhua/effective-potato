@@ -19,6 +19,8 @@ clean-data = "scripts.clean_data:main"
 build-aggregations = "scripts.build_aggregations:main"
 build-category-lookup = "scripts.build_category_lookup:main"
 build-region-lookup = "scripts.build_region_lookup:main"
+build-region-map = "scripts.build_region_map:main"
+update-lookups = "scripts.update_lookups:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["data_pipeline", "scripts"]

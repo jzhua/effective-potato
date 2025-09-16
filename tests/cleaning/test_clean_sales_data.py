@@ -163,20 +163,21 @@ def test_clean_csv_rejects_unknown_region(tmp_path):
     assert cleaned.empty
 
 
-def test_region_fuzzy_lookup(tmp_path, monkeypatch):
+def _patch_region_map(monkeypatch, mapping: dict[str, str]) -> None:
+    monkeypatch.setattr(clean_sales_data, "_REGION_MAP", mapping, raising=False)
     monkeypatch.setattr(
         clean_sales_data,
-        "_CANONICAL_REGIONS",
-        ["North America"],
-        raising=False,
-    )
-    monkeypatch.setattr(
-        clean_sales_data,
-        "_REGION_LOOKUP",
-        {"north america": "North America"},
+        "_REGION_MAP_CASEFOLD",
+        {key.casefold(): value for key, value in mapping.items()},
         raising=False,
     )
     clean_sales_data._resolve_region.cache_clear()
+
+
+def test_region_mapping_lookup(tmp_path, monkeypatch):
+    mapping = dict(clean_sales_data._REGION_MAP)
+    mapping["north ameria"] = "North America"
+    _patch_region_map(monkeypatch, mapping)
 
     raw_frame = pd.DataFrame(
         {
@@ -203,3 +204,38 @@ def test_region_fuzzy_lookup(tmp_path, monkeypatch):
 
     cleaned = pd.read_parquet(output_path)
     assert cleaned.loc[0, "region"] == "North America"
+
+
+def test_region_acronym_lookup(tmp_path, monkeypatch):
+    mapping = {
+        "United States": "United States",
+        "US": "United States",
+        "U.S.": "United States",
+    }
+    _patch_region_map(monkeypatch, mapping)
+
+    raw_frame = pd.DataFrame(
+        {
+            "order_id": ["ORD-1"],
+            "product_name": ["Widget"],
+            "category": ["Electronics"],
+            "quantity": [1],
+            "unit_price": [10.0],
+            "discount_percent": [0.0],
+            "region": ["US"],
+            "sale_date": ["2023-05-01"],
+            "customer_email": ["customer@example.com"],
+        }
+    )
+    csv_path = tmp_path / "raw.csv"
+    raw_frame.to_csv(csv_path, index=False)
+
+    output_path = tmp_path / "clean.parquet"
+    clean_csv_to_parquet(
+        csv_path,
+        output_path,
+        config=CleanConfig(chunk_size=10, save_rejected_rows=False),
+    )
+
+    cleaned = pd.read_parquet(output_path)
+    assert cleaned.loc[0, "region"] == "United States"

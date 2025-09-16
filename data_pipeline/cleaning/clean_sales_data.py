@@ -28,15 +28,34 @@ if not isinstance(_COMMON_CATEGORIES, list):
 _CANONICAL_CATEGORIES = sorted({str(category).strip() for category in _COMMON_CATEGORIES if category})
 _CANONICAL_LOOKUP = {category.casefold(): category for category in _CANONICAL_CATEGORIES}
 
-_REGION_LOOKUP_PATH = DATA_DIR / "lookups" / "common_regions.json"
-with _REGION_LOOKUP_PATH.open(encoding="utf-8") as fh:
+_REGION_LIST_PATH = DATA_DIR / "lookups" / "common_regions.json"
+with _REGION_LIST_PATH.open(encoding="utf-8") as fh:
     _COMMON_REGIONS = json.load(fh)
 
 if not isinstance(_COMMON_REGIONS, list):
     raise ValueError("common_regions.json must contain a JSON array of region names")
 
 _CANONICAL_REGIONS = sorted({str(region).strip() for region in _COMMON_REGIONS if region})
-_REGION_LOOKUP = {region.casefold(): region for region in _CANONICAL_REGIONS}
+_CANONICAL_REGION_SET = set(_CANONICAL_REGIONS)
+
+_REGION_MAP_PATH = DATA_DIR / "lookups" / "region_map.json"
+with _REGION_MAP_PATH.open(encoding="utf-8") as fh:
+    _REGION_MAP_RAW = json.load(fh)
+
+if not isinstance(_REGION_MAP_RAW, dict):
+    raise ValueError("region_map.json must contain a JSON object of raw->canonical mappings")
+
+_REGION_MAP = {}
+for raw_value, mapped_to in _REGION_MAP_RAW.items():
+    key = str(raw_value).strip()
+    if not key:
+        continue
+    value = str(mapped_to).strip()
+    if value != "UNKNOWN" and value not in _CANONICAL_REGION_SET:
+        raise ValueError(f"Region mapping for '{raw_value}' must target a known canonical region or 'UNKNOWN'")
+    _REGION_MAP[key] = value
+
+_REGION_MAP_CASEFOLD = {key.casefold(): value for key, value in _REGION_MAP.items()}
 
 _FUZZY_THRESHOLD = 2
 
@@ -96,30 +115,20 @@ def _resolve_category(value: str) -> str | None:
     return None
 
 
-@functools.lru_cache(maxsize=1024)
+@functools.lru_cache(maxsize=2048)
 def _resolve_region(value: str) -> str | None:
     normalised = value.strip()
     if not normalised:
         return None
-    lowered = normalised.casefold()
 
-    if lowered in _REGION_LOOKUP:
-        return _REGION_LOOKUP[lowered]
+    mapped = _REGION_MAP.get(normalised)
+    if mapped is None:
+        mapped = _REGION_MAP_CASEFOLD.get(normalised.casefold())
 
-    best_match: str | None = None
-    best_distance = _FUZZY_THRESHOLD + 1
-    for candidate in _CANONICAL_REGIONS:
-        distance = _levenshtein(lowered, candidate.casefold(), max_distance=_FUZZY_THRESHOLD)
-        if distance < best_distance:
-            best_distance = distance
-            best_match = candidate
-        if best_distance == 0:
-            break
+    if mapped is None or mapped == "UNKNOWN":
+        return None
 
-    if best_match is not None and best_distance <= _FUZZY_THRESHOLD:
-        return best_match
-
-    return None
+    return mapped
 
 
 @dataclass

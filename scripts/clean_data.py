@@ -19,10 +19,10 @@ def parse_args() -> argparse.Namespace:
         help="Path to the raw CSV file produced by the generator.",
     )
     parser.add_argument(
-        "--output",
+        "--output-dir",
         type=Path,
-        default=CLEAN_OUTPUT_DIR / "raw_ecommerce_data_clean.parquet",
-        help="Destination parquet file for the cleaned dataset.",
+        default=CLEAN_OUTPUT_DIR,
+        help="Directory where the cleaned parquet file will be written.",
     )
     parser.add_argument(
         "--chunk-size",
@@ -68,7 +68,11 @@ def main() -> None:
     # Log configuration
     logger.info("Starting CSV cleaning process")
     logger.info(f"Input file: {args.input}")
-    logger.info(f"Output file: {args.output}")
+    output_dir = args.output_dir
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_file = output_dir / f"{args.input.stem}_clean.parquet"
+
+    logger.info(f"Output file: {output_file}")
     logger.info(f"Chunk size: {args.chunk_size:,} rows")
     logger.info(f"Drop zero quantity: {not args.keep_zero_quantity}")
     logger.info(f"Save rejected rows: {not args.no_save_rejected}")
@@ -83,10 +87,10 @@ def main() -> None:
         drop_zero_quantity=not args.keep_zero_quantity,
         save_rejected_rows=not args.no_save_rejected
     )
-    
+
     start_time = time.time()
     try:
-        output_path, rejected_path = clean_csv_to_parquet(args.input, args.output, config=config)
+        output_path, rejected_path = clean_csv_to_parquet(args.input, output_file, config=config)
         elapsed = time.time() - start_time
         
         # Log completion stats

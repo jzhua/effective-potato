@@ -24,9 +24,9 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--threshold",
-        type=int,
-        default=50,
-        help="Minimum number of occurrences required to include a category (default: 50).",
+        type=float,
+        default=0.01,
+        help="Minimum share of total rows (0-1) required to include a category (default: 0.01 for 1%).",
     )
     parser.add_argument(
         "--output",
@@ -44,10 +44,17 @@ def iter_categories(paths: Iterable[Path]) -> Iterable[str]:
             yield value.strip()
 
 
-def build_lookup(categories: Counter[str], threshold: int) -> list[str]:
+def build_lookup(categories: Counter[str], threshold: float) -> list[str]:
+    if not 0 <= threshold <= 1:
+        raise ValueError("threshold must be between 0 and 1")
+
+    total = sum(categories.values())
+    if total == 0:
+        return []
+
     canonicals: list[str] = []
     for raw, count in categories.most_common():
-        if count < threshold:
+        if (count / total) < threshold:
             break
         normalised = raw.strip()
         if not normalised:

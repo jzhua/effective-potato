@@ -7,28 +7,29 @@ that can scale via chunked processing.
 
 ## Project Structure
 
-- `data_pipeline_dashboard/` – core Python package
-  - `generation/` – utilities for creating raw CSV files
-  - `cleaning/` – routines that transform messy CSV exports into clean parquet
-  - `aggregations/` – business metric builders consumed by the dashboard layer
-- `scripts/` – command-line helpers that orchestrate each stage
-- `data/` – storage for generated inputs, cleaned parquet, and derived metrics
+- `data_pipeline/` – core Python package
+  - `generation/` – synthetic data builders
+  - `cleaning/` – CSV->parquet normalisation, validation, and anomaly flags
+  - `aggregations/` – metric builders that feed downstream dashboards
+- `scripts/` – CLI entry points (`generate_data`, `clean_data`, lookup builders)
+- `data/` – workspace for inputs (`input/`), cleaned parquet (`clean/`), lookups (`lookups/`), and derived outputs (`aggregations/`, `rejected/`)
+- `tests/` – pytest coverage for cleaning and aggregation behaviour
 
 ## Quick Start
 
 The end-to-end flow will eventually be automated, but while things are in flux
-you can run each step manually. The commands below assume an environment where
-`python` invokes your project interpreter; adapt as needed.
+you can run each step manually. The commands below use `uv run` so the project
+virtual environment is activated automatically.
 
 ```bash
 # 1. Generate dirty or clean synthetic input data
-python -m scripts.generate_data --rows 100000
+uv run generate-data --rows 100000
 
 # 2. Clean the raw CSV into a parquet dataset
-python -m scripts.clean_data --input data/input/raw_ecommerce_data.csv
+uv run clean-data --input data/input/raw_ecommerce_data.csv
 
 # 3. Build aggregated parquet artefacts for the dashboard
-python -m scripts.build_aggregations --cleaned data/clean/raw_ecommerce_data_clean.parquet
+uv run build-aggregations --cleaned data/clean/raw_ecommerce_data_clean.parquet
 ```
 
 All scripts accept additional flags (run with `--help`) for customising paths
@@ -37,13 +38,17 @@ or tuning chunk sizes.
 If the source data drifts, regenerate canonical category and region lists with:
 
 ```bash
-python -m scripts.build_category_lookup data/input/dirty_1m.csv
-python -m scripts.build_region_lookup data/input/dirty_1m.csv
+uv run build-category-lookup data/input/dirty_1m.csv
+uv run build-region-lookup data/input/dirty_1m.csv
+uv run build-region-map data/input/dirty_1m.csv
+# Or run everything (with tests) in one pass
+uv run update-lookups data/input/dirty_1m.csv
 ```
 
 Each command writes a JSON file under `data/lookups/`, which doubles as a
 human-editable list—feel free to hand-fix or expand entries before the next
-cleaning run.
+cleaning run. The region map will mark uncertain values as `UNKNOWN`; review
+and adjust those rows before re-running the cleaner.
 
 ## Roadmap
 
