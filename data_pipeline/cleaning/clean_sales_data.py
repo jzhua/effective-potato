@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Mapping, MutableSet
+from typing import MutableSet
 import functools
 import json
 import logging
@@ -18,64 +18,25 @@ from data_pipeline.settings import CLEAN_OUTPUT_DIR, DATA_DIR, REJECTED_OUTPUT_D
 _NULLISH = {"", "null", "n/a", "na", "none", "-", "missing"}
 _NULLISH_REPLACEMENTS = {value: "" for value in _NULLISH}
 
-# Canonical category names keyed by their normalized raw form.
-_CATEGORY_ALIASES: Mapping[str, str] = {
-    "electronics": "Electronics",
-    "consumer electronics": "Electronics",
-    "tech": "Electronics",
-    "clothing": "Clothing",
-    "fashion": "Clothing",
-    "apparel": "Clothing",
-    "wearables": "Clothing",
-    "sports": "Sports",
-    "fitness": "Sports",
-    "outdoor": "Sports",
-    "athletic": "Sports",
-    "home & garden": "Home & Garden",
-    "home": "Home & Garden",
-    "garden": "Home & Garden",
-    "home improvement": "Home & Garden",
-    "furniture": "Home & Garden",
-    "books": "Books",
-    "literature": "Books",
-    "education": "Books",
-    "media": "Books",
-    "health": "Health & Beauty",
-    "beauty": "Health & Beauty",
-    "personal care": "Health & Beauty",
-    "wellness": "Health & Beauty",
-    "automotive": "Automotive",
-    "auto": "Automotive",
-    "car accessories": "Automotive",
-    "vehicle": "Automotive",
-    "transportation": "Automotive",
-    "toys": "Toys & Games",
-    "games": "Toys & Games",
-    "kids": "Toys & Games",
-    "entertainment": "Toys & Games",
-    "kitchen": "Kitchen",
-    "appliances": "Kitchen",
-    "cooking": "Kitchen",
-    "dining": "Kitchen",
-    "office": "Office",
-    "business": "Office",
-    "supplies": "Office",
-    "workspace": "Office",
-}
-
-_CATEGORY_ALIAS_LOOKUP = {key.casefold(): value for key, value in _CATEGORY_ALIASES.items()}
-
 _CATEGORY_LOOKUP_PATH = DATA_DIR / "lookups" / "common_categories.json"
-try:
-    with _CATEGORY_LOOKUP_PATH.open(encoding="utf-8") as fh:
-        _COMMON_CATEGORIES = json.load(fh)
-except FileNotFoundError:
-    _COMMON_CATEGORIES = []
+with _CATEGORY_LOOKUP_PATH.open(encoding="utf-8") as fh:
+    _COMMON_CATEGORIES = json.load(fh)
 
-_CANONICAL_CATEGORIES = sorted({
-    *(_category for _category in _COMMON_CATEGORIES),
-    *_CATEGORY_ALIASES.values(),
-})
+if not isinstance(_COMMON_CATEGORIES, list):
+    raise ValueError("common_categories.json must contain a JSON array of category names")
+
+_CANONICAL_CATEGORIES = sorted({str(category).strip() for category in _COMMON_CATEGORIES if category})
+_CANONICAL_LOOKUP = {category.casefold(): category for category in _CANONICAL_CATEGORIES}
+
+_REGION_LOOKUP_PATH = DATA_DIR / "lookups" / "common_regions.json"
+with _REGION_LOOKUP_PATH.open(encoding="utf-8") as fh:
+    _COMMON_REGIONS = json.load(fh)
+
+if not isinstance(_COMMON_REGIONS, list):
+    raise ValueError("common_regions.json must contain a JSON array of region names")
+
+_CANONICAL_REGIONS = sorted({str(region).strip() for region in _COMMON_REGIONS if region})
+_REGION_LOOKUP = {region.casefold(): region for region in _CANONICAL_REGIONS}
 
 _FUZZY_THRESHOLD = 2
 
@@ -116,8 +77,8 @@ def _resolve_category(value: str) -> str | None:
         return None
     lowered = normalised.casefold()
 
-    if lowered in _CATEGORY_ALIAS_LOOKUP:
-        return _CATEGORY_ALIAS_LOOKUP[lowered]
+    if lowered in _CANONICAL_LOOKUP:
+        return _CANONICAL_LOOKUP[lowered]
 
     best_match: str | None = None
     best_distance = _FUZZY_THRESHOLD + 1
@@ -134,53 +95,31 @@ def _resolve_category(value: str) -> str | None:
 
     return None
 
-_REGION_ALIASES: Mapping[str, str] = {
-    "north america": "North America",
-    "n america": "North America",
-    "north ameica": "North America",
-    "na": "North America",
-    "united states": "North America",
-    "us": "North America",
-    "usa": "North America",
-    "canada": "North America",
-    "europe": "Europe",
-    "eurpoe": "Europe",
-    "eu": "Europe",
-    "united kingdom": "Europe",
-    "uk": "Europe",
-    "germany": "Europe",
-    "france": "Europe",
-    "spain": "Europe",
-    "asia": "Asia",
-    "aisa": "Asia",
-    "china": "Asia",
-    "japan": "Asia",
-    "india": "Asia",
-    "south korea": "Asia",
-    "southeast asia": "Asia",
-    "south america": "South America",
-    "s america": "South America",
-    "latin america": "South America",
-    "brazil": "South America",
-    "argentina": "South America",
-    "chile": "South America",
-    "australia": "Oceania",
-    "austrailia": "Oceania",
-    "oceania": "Oceania",
-    "new zealand": "Oceania",
-    "au": "Oceania",
-    "africa": "Africa",
-    "middle east": "Middle East & Africa",
-    "south africa": "Africa",
-    "nigeria": "Africa",
-    "egypt": "Africa",
-    "eastern europe": "Europe",
-    "western europe": "Europe",
-    "central america": "Central America",
-    "caribbean": "Central America",
-    "scandinavia": "Europe",
-    "nordic": "Europe",
-}
+
+@functools.lru_cache(maxsize=1024)
+def _resolve_region(value: str) -> str | None:
+    normalised = value.strip()
+    if not normalised:
+        return None
+    lowered = normalised.casefold()
+
+    if lowered in _REGION_LOOKUP:
+        return _REGION_LOOKUP[lowered]
+
+    best_match: str | None = None
+    best_distance = _FUZZY_THRESHOLD + 1
+    for candidate in _CANONICAL_REGIONS:
+        distance = _levenshtein(lowered, candidate.casefold(), max_distance=_FUZZY_THRESHOLD)
+        if distance < best_distance:
+            best_distance = distance
+            best_match = candidate
+        if best_distance == 0:
+            break
+
+    if best_match is not None and best_distance <= _FUZZY_THRESHOLD:
+        return best_match
+
+    return None
 
 
 @dataclass
@@ -198,15 +137,6 @@ def _normalise_string(series: pd.Series) -> pd.Series:
         .astype(str)
         .str.strip()
     )
-
-
-def _map_alias(series: pd.Series, mapping: Mapping[str, str], default: str) -> pd.Series:
-    normalised = _normalise_string(series).replace(_NULLISH_REPLACEMENTS)
-    lowered = normalised.str.lower()
-    mapped = lowered.map(mapping)
-    # Fill with the original title-cased value when we do not have a mapping.
-    fallback = normalised.replace({"": default})
-    return mapped.fillna(fallback.str.title())
 
 
 def _clean_customer_email(series: pd.Series) -> pd.Series:
@@ -285,20 +215,33 @@ def _clean_chunk(frame: pd.DataFrame, seen_order_ids: MutableSet[str], config: C
 
     resolved_series = resolved_series.astype("string")
     data = data.assign(category=resolved_series.loc[data.index])
-    data["region"] = _map_alias(data.get("region"), _REGION_ALIASES, "Other")
+
+    raw_regions = _normalise_string(data.get("region")).replace(_NULLISH_REPLACEMENTS)
+    resolved_regions = [_resolve_region(value) for value in raw_regions.tolist()]
+    region_series = pd.Series(resolved_regions, index=data.index, dtype="object")
+    valid_region_mask = region_series.notna()
+    data = _reject_rows(valid_region_mask, "unknown_region")
+    if data.empty:
+        rejected_frames = [frame for frame in rejected_rows if not frame.empty]
+        rejected_df = pd.concat(rejected_frames, ignore_index=True) if rejected_frames else pd.DataFrame()
+        return data, rejected_df
+
+    region_series = region_series.astype("string")
+    data = data.assign(region=region_series.loc[data.index])
 
     # Step 4: Clean numeric fields and validate ranges.
     data["quantity"] = _clean_numeric(data.get("quantity"), dtype="int")
     data["unit_price"] = _clean_numeric(data.get("unit_price"))
     data["discount_percent"] = _clean_discount(data.get("discount_percent"))
-    
+
     # Basic validation: negative prices or extreme values
     valid_price_mask = (data["unit_price"] > 0) & (data["unit_price"] < 50000)  # $0-$50k range
     data = _reject_rows(valid_price_mask, "invalid_unit_price")
-    
-    # Validate discount range (already clamped but check for suspicious values)
-    valid_discount_mask = data["discount_percent"] <= 0.95  # Max 95% discount
-    data = _reject_rows(valid_discount_mask, "excessive_discount")
+
+    # Flag heavy discounts for downstream anomaly review
+    heavy_discount_mask = data["discount_percent"] > 0.80
+    if heavy_discount_mask.any():
+        data.loc[heavy_discount_mask, "anomaly_flag"] = "heavy_discount"
 
     # Step 5: Drop zero quantity if configured
     if config.drop_zero_quantity:
@@ -359,8 +302,10 @@ def _clean_chunk(frame: pd.DataFrame, seen_order_ids: MutableSet[str], config: C
         "customer_email",
         "revenue",
     ]
-    
-    cleaned_data = data[columns] if not data.empty else data
+
+    if "anomaly_flag" in data.columns:
+        columns.append("anomaly_flag")
+    cleaned_data = data[columns]
     rejected_frames = [frame for frame in rejected_rows if not frame.empty]
     rejected_df = pd.concat(rejected_frames, ignore_index=True) if rejected_frames else pd.DataFrame()
     

@@ -34,13 +34,14 @@ python -m scripts.build_aggregations --cleaned data/clean/raw_ecommerce_data_cle
 All scripts accept additional flags (run with `--help`) for customising paths
 or tuning chunk sizes.
 
-If the source data drifts, regenerate canonical category names with:
+If the source data drifts, regenerate canonical category and region lists with:
 
 ```bash
 python -m scripts.build_category_lookup data/input/dirty_1m.csv
+python -m scripts.build_region_lookup data/input/dirty_1m.csv
 ```
 
-The command writes `data/lookups/common_categories.json`, which doubles as a
+Each command writes a JSON file under `data/lookups/`, which doubles as a
 human-editable list—feel free to hand-fix or expand entries before the next
 cleaning run.
 

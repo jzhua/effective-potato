@@ -18,6 +18,7 @@ generate-data = "scripts.generate_data:main"
 clean-data = "scripts.clean_data:main"
 build-aggregations = "scripts.build_aggregations:main"
 build-category-lookup = "scripts.build_category_lookup:main"
+build-region-lookup = "scripts.build_region_lookup:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["data_pipeline", "scripts"]
