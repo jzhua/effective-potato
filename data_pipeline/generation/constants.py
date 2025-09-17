@@ -46,15 +46,22 @@ CATEGORY_PRICE_RANGES = {
     "Travel & Luggage": (30, 600)
 }
 
-# Regions with intentional spelling mistakes for data quality testing
+# Regions focused on India and Southeast Asia with intentional spelling mistakes for data quality testing
 REGIONS = [
-    "North America", "north america", "N America", "North Ameica", "NA", "United States", "US", "Canada", "USA",
-    "Europe", "europe", "EUROPE", "Eurpoe", "EU", "United Kingdom", "UK", "Germany", "France", "Spain",
-    "Asia", "asia", "ASIA", "Aisa", "China", "Japan", "India", "South Korea", "Southeast Asia",
-    "South America", "south america", "S America", "Latin America", "Brazil", "Argentina", "Chile",
-    "Australia", "australia", "Austrailia", "Oceania", "New Zealand", "AU",
-    "Africa", "africa", "AFRICA", "Middle East", "South Africa", "Nigeria", "Egypt",
-    "Eastern Europe", "Western Europe", "Central America", "Caribbean", "Scandinavia", "Nordic"
+    # Major Indian cities/states
+    "Mumbai", "Mumbay", "Bombay",
+    "Delhi", "Dehli", "New Delhi",
+    "Bangalore", "Bengaluru", "Bangalor",
+    "Chennai", "Chenai", "Madras",
+    "Kolkata", "Kolkatta", "Calcutta",
+    
+    # Southeast Asian countries
+    "Thailand", "Thailnd",
+    "Singapore", "Singapre",
+    "Malaysia", "Malaysa", "Malasia",
+    "Indonesia", "indonsia",
+    "Vietnam", "Viet Nam",
+    "Philippines", "Philipines", "phillipines",
 ]
 
 # Email domains for customer email generation
