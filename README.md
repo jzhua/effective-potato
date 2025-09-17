@@ -163,4 +163,4 @@ possible parallelism was disabled.
 
 - Generate 100M row csv: ~20 mins
 - Data cleanup/filtering: ~8 mins
-- Create aggregations: ~9 mins
+- Create aggregations: ~20 mins
