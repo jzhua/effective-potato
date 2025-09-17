@@ -5,11 +5,13 @@ from typing import Iterable
 
 import pandas as pd
 import plotly.express as px
-from dash import Dash, Input, Output, dcc, html, dash_table
+from dash import Dash, Input, Output, State, dcc, html, dash_table
+from dash.exceptions import PreventUpdate
 
 from data_pipeline.settings import AGGREGATIONS_DIR, REJECTED_OUTPUT_DIR, ensure_directories
 
 _ANOMALY_FILENAME = "anomaly_records.parquet"
+_TOP_PRODUCTS_BY_CATEGORY_FILENAME = "top_products_by_category.parquet"
 _PREVIEW_ROW_LIMIT = 50
 _TOP_REASON_LIMIT = 5
 
@@ -63,6 +65,99 @@ def _empty_message(message: str) -> html.Div:
 
 def _empty_figure(title: str):
     return {"data": [], "layout": {"title": title}}
+
+
+def _create_top_categories_figure(df: pd.DataFrame):
+    """Create a custom figure for top_categories with human-friendly titles (default: discount)"""
+    return _create_dynamic_top_categories_figure(df, "avg_discount_percent")
+
+
+def _create_dynamic_top_categories_figure(df: pd.DataFrame, metric: str):
+    """Create a top_categories figure with dynamic metric selection"""
+    if df.empty or metric not in df.columns or "category" not in df.columns:
+        return None
+        
+    # Define metric configurations
+    metric_config = {
+        "avg_discount_percent": {
+            "title": "Top Categories by Average Discount",
+            "label": "Average Discount %",
+            "hover_data": ["total_revenue", "order_count"]
+        },
+        "total_revenue": {
+            "title": "Top Categories by Revenue", 
+            "label": "Total Revenue",
+            "hover_data": ["avg_discount_percent", "order_count"]
+        },
+        "order_count": {
+            "title": "Top Categories by Order Volume",
+            "label": "Order Count", 
+            "hover_data": ["avg_discount_percent", "total_revenue"]
+        }
+    }
+    
+    config = metric_config.get(metric, {
+        "title": f"Top Categories by {metric}",
+        "label": metric,
+        "hover_data": []
+    })
+    
+    # Sort by the selected metric and show top 15
+    top_categories = df.sort_values(metric, ascending=False).head(15)
+    
+    return px.bar(
+        top_categories, 
+        x="category", 
+        y=metric,
+        title=f"{config['title']} (Click to view category products)",
+        labels={"category": "Category", metric: config["label"]},
+        hover_data=config["hover_data"]
+    )
+
+
+def _create_top_products_by_category_figure(df: pd.DataFrame, metric: str):
+    """Create a top_products_by_category figure with dynamic metric selection"""
+    if df.empty or "category" not in df.columns:
+        return None
+        
+    # Define metric configurations
+    metric_config = {
+        "total_revenue": {
+            "title": "Categories by Total Revenue",
+            "label": "Total Revenue",
+            "hover_data": ["order_count"]
+        },
+        "total_quantity": {
+            "title": "Categories by Total Quantity", 
+            "label": "Total Quantity",
+            "hover_data": ["order_count"]
+        },
+        "order_count": {
+            "title": "Categories by Order Count",
+            "label": "Order Count", 
+            "hover_data": ["total_revenue"]
+        }
+    }
+    
+    config = metric_config.get(metric, {
+        "title": f"Categories by {metric}",
+        "label": metric,
+        "hover_data": []
+    })
+    
+    # Sum by category and sort descending
+    if metric not in df.columns:
+        return None
+    category_metrics = df.groupby("category")[metric].sum().reset_index()
+    category_metrics = category_metrics.sort_values(metric, ascending=False).head(15)
+    
+    return px.bar(
+        category_metrics, 
+        x="category", 
+        y=metric,
+        title=config['title'],
+        labels={"category": "Category", metric: config["label"]}
+    )
 
 
 def _default_figure(df: pd.DataFrame, title: str):
@@ -206,11 +301,93 @@ def create_app() -> Dash:
                                 ],
                                 style={"maxWidth": "400px", "marginBottom": "1rem"},
                             ),
+                            html.Div(
+                                [
+                                    html.Label("Chart Metric"),
+                                    dcc.RadioItems(
+                                        id="chart-metric-selector",
+                                        options=[
+                                            {"label": "Average Discount %", "value": "avg_discount_percent"},
+                                            {"label": "Total Revenue", "value": "total_revenue"},
+                                            {"label": "Order Count", "value": "order_count"},
+                                        ],
+                                        value="total_revenue",
+                                        inline=True,
+                                    ),
+                                ],
+                                id="chart-metric-controls",
+                                style={"display": "none", "marginBottom": "1rem"},
+                            ),
                             html.Div(id="aggregation-summary", style={"marginBottom": "1rem"}),
                             dcc.Graph(
                                 id="aggregation-chart",
                                 figure=_empty_figure("Select an aggregation dataset"),
                                 style={"marginBottom": "1rem"},
+                            ),
+                            html.Div(
+                                [
+                                    html.H3("Category best sellers"),
+                                    html.Div(
+                                        [
+                                            html.Label("Metric"),
+                                            dcc.RadioItems(
+                                                id="category-metric",
+                                                options=[
+                                                    {"label": "Revenue", "value": "revenue"},
+                                                    {"label": "Units sold", "value": "units"},
+                                                ],
+                                                value="revenue",
+                                                inline=True,
+                                            ),
+                                        ],
+                                        style={"marginBottom": "0.75rem"},
+                                    ),
+                                    html.Label("Category"),
+                                    dcc.Dropdown(
+                                        id="category-selector",
+                                        options=[],
+                                        value=None,
+                                        placeholder="Run build-aggregations to populate category rankings",
+                                        clearable=False,
+                                        style={"maxWidth": "400px", "marginBottom": "1rem"},
+                                    ),
+                                    html.Div(
+                                        [
+                                            html.Label("Top N products"),
+                                            dcc.Input(
+                                                id="category-top-n",
+                                                type="number",
+                                                min=1,
+                                                max=50,
+                                                step=1,
+                                                value=5,
+                                                style={"width": "120px"},
+                                            ),
+                                            html.Span(
+                                                "  Applies when a specific category is selected",
+                                                style={"marginLeft": "0.5rem", "fontStyle": "italic", "fontSize": "0.85rem"},
+                                            ),
+                                        ],
+                                        style={"marginBottom": "1rem"},
+                                    ),
+                                    dcc.Graph(
+                                        id="category-best-chart",
+                                        figure=_empty_figure("Select a category to see top products chart"),
+                                        style={"marginBottom": "1rem"},
+                                    ),
+                                    dash_table.DataTable(
+                                        id="category-best-table",
+                                        data=[],
+                                        columns=[],
+                                        page_size=20,
+                                        sort_action="native",
+                                        filter_action="native",
+                                        style_table={"overflowX": "auto"},
+                                        style_cell={"textAlign": "left", "padding": "0.25rem"},
+                                    ),
+                                ],
+                                id="top-products-category",
+                                style={"display": "none", "marginBottom": "1rem"},
                             ),
                             dash_table.DataTable(
                                 id="aggregation-table",
@@ -294,23 +471,185 @@ def create_app() -> Dash:
         Output("aggregation-table", "data"),
         Output("aggregation-table", "columns"),
         Output("aggregation-chart", "figure"),
+        Output("top-products-category", "style"),
+        Output("chart-metric-controls", "style"),
         Input("aggregation-selector", "value"),
         Input("refresh-data", "n_clicks"),
     )
     def _update_aggregation(selected_value: str | None, _: int):
+        hidden_style = {"display": "none"}
+        category_style = hidden_style
+        chart_metric_style = hidden_style
+
         if not selected_value:
-            return _empty_message("No aggregation dataset selected."), [], [], _empty_figure("No data available")
+            message = _empty_message("No aggregation dataset selected.")
+            return message, [], [], _empty_figure("No data available"), category_style, chart_metric_style
+
         path = Path(selected_value)
         if not path.exists():
-            message = f"{path.name} is missing. Run the aggregation pipeline."
-            return _empty_message(message), [], [], _empty_figure("File not found")
+            missing_message = f"{path.name} is missing. Run the aggregation pipeline."
+            return (
+                _empty_message(missing_message),
+                [],
+                [],
+                _empty_figure("File not found"),
+                category_style,
+                chart_metric_style,
+            )
+
         df = _load_parquet(path)
         summary = _summarise_dataframe(df, path)
         data, columns = _dataframe_preview(df)
-        figure = _default_figure(df, path.stem)
+        
+        # Create figure with custom handling for specific files
+        if path.name == "top_categories.parquet":
+            figure = _create_top_categories_figure(df)
+        elif path.name == _TOP_PRODUCTS_BY_CATEGORY_FILENAME:
+            # Use default metric (total_revenue) for initial load
+            figure = _create_top_products_by_category_figure(df, "total_revenue")
+        else:
+            figure = _default_figure(df, path.stem)
+            
         if figure is None:
             figure = _empty_figure("Add numeric columns to visualise this aggregation")
-        return summary, data, columns, figure
+
+        if path.name == _TOP_PRODUCTS_BY_CATEGORY_FILENAME:
+            category_style = {"marginBottom": "1rem"}
+            
+        # Show chart metric controls for files that support multiple metrics
+        if path.name in ["top_categories.parquet", _TOP_PRODUCTS_BY_CATEGORY_FILENAME]:
+            chart_metric_style = {"marginBottom": "1rem"}
+
+        return summary, data, columns, figure, category_style, chart_metric_style
+
+    @app.callback(
+        Output("aggregation-chart", "figure", allow_duplicate=True),
+        Input("chart-metric-selector", "value"),
+        State("aggregation-selector", "value"),
+        prevent_initial_call=True,
+    )
+    def _update_chart_metric(selected_metric, current_aggregation):
+        if not current_aggregation or not selected_metric:
+            raise PreventUpdate
+            
+        path = Path(current_aggregation)
+        if not path.exists():
+            raise PreventUpdate
+            
+        df = _load_parquet(path)
+        if df.empty:
+            raise PreventUpdate
+            
+        # Handle different file types
+        if path.name == "top_categories.parquet":
+            if selected_metric not in df.columns:
+                raise PreventUpdate
+            figure = _create_dynamic_top_categories_figure(df, selected_metric)
+        elif path.name == _TOP_PRODUCTS_BY_CATEGORY_FILENAME:
+            figure = _create_top_products_by_category_figure(df, selected_metric)
+        else:
+            raise PreventUpdate
+            
+        return figure if figure else _empty_figure("Unable to create chart")
+
+    @app.callback(
+        Output("category-selector", "options"),
+        Output("category-selector", "value"),
+        Input("aggregation-selector", "value"),
+        Input("refresh-data", "n_clicks"),
+        State("category-selector", "value"),
+    )
+    def _update_category_selector(selected_value: str | None, _: int, current_value: str | None):
+        if not selected_value:
+            return [], None
+        path = Path(selected_value)
+        if path.name != _TOP_PRODUCTS_BY_CATEGORY_FILENAME or not path.exists():
+            return [], None
+        df = _load_parquet(path)
+        if df.empty or "category" not in df.columns:
+            return [], None
+        categories = sorted(df["category"].dropna().astype(str).unique().tolist())
+        if not categories:
+            return [], None
+        options = [{"label": category, "value": category} for category in categories]
+        value = current_value if current_value in categories else categories[0]
+        return options, value
+
+    @app.callback(
+        Output("category-best-table", "data"),
+        Output("category-best-table", "columns"),
+        Output("category-best-chart", "figure"),
+        Input("category-selector", "value"),
+        Input("category-metric", "value"),
+        Input("category-top-n", "value"),
+        Input("aggregation-selector", "value"),
+        Input("refresh-data", "n_clicks"),
+    )
+    def _update_category_table(
+        selected_category: str | None,
+        selected_metric: str | None,
+        top_n: int | None,
+        selected_value: str | None,
+        _: int,
+    ):
+        if not selected_value:
+            return [], [], _empty_figure("No data selected")
+        path = Path(selected_value)
+        if path.name != _TOP_PRODUCTS_BY_CATEGORY_FILENAME or not path.exists():
+            return [], [], _empty_figure("Top products by category file not found")
+        df = _load_parquet(path)
+        if df.empty:
+            return [], [], _empty_figure("No data available")
+        metric = selected_metric if selected_metric in {"revenue", "units"} else "revenue"
+        metric_df = df[df["metric_type"] == metric].copy()
+        if metric_df.empty:
+            return [], [], _empty_figure(f"No {metric} data available")
+        metric_df = metric_df.sort_values(["category", "rank"]).reset_index(drop=True)
+
+        DEFAULT_PER_CATEGORY = 3
+        if selected_category:
+            filtered = metric_df[metric_df["category"].astype(str) == selected_category]
+            limit = DEFAULT_PER_CATEGORY
+            if isinstance(top_n, (int, float)):
+                try:
+                    limit = max(1, int(top_n))
+                except (TypeError, ValueError):
+                    limit = DEFAULT_PER_CATEGORY
+            filtered = filtered.head(limit)
+        else:
+            filtered = metric_df.groupby("category", group_keys=False).head(DEFAULT_PER_CATEGORY)
+
+        # Create chart
+        if filtered.empty:
+            figure = _empty_figure("No data to display")
+        else:
+            # Determine what to display on y-axis based on metric
+            y_column = "total_revenue" if metric == "revenue" else "total_quantity"
+            y_label = "Total Revenue" if metric == "revenue" else "Total Quantity"
+            
+            # Create bar chart
+            figure = px.bar(
+                filtered,
+                x="product_name",
+                y=y_column,
+                color="category" if not selected_category else None,
+                title=f"Top Products by {y_label}" + (f" - {selected_category}" if selected_category else ""),
+                text_auto=True,
+                labels={
+                    "product_name": "Product",
+                    y_column: y_label,
+                    "category": "Category"
+                }
+            )
+            figure.update_layout(
+                xaxis_tickangle=-45,
+                margin=dict(b=100),  # Add bottom margin for rotated labels
+                showlegend=not selected_category  # Only show legend when multiple categories
+            )
+        
+        data = filtered.to_dict("records")
+        columns = [{"name": str(col), "id": str(col)} for col in filtered.columns]
+        return data, columns, figure
 
     @app.callback(
         Output("anomaly-summary", "children"),
@@ -372,5 +711,42 @@ def create_app() -> Dash:
         )
         data, columns = _dataframe_preview(filtered)
         return summary, reason_summary, options, data, columns
+
+    @app.callback(
+        Output("aggregation-selector", "value"),
+        Output("category-selector", "value", allow_duplicate=True),
+        Input("aggregation-chart", "clickData"),
+        State("aggregation-selector", "value"),
+        prevent_initial_call=True,
+    )
+    def _handle_chart_click(click_data, current_aggregation):
+        if not click_data or not current_aggregation:
+            raise PreventUpdate
+            
+        # Only handle clicks on top_categories charts
+        current_path = Path(current_aggregation)
+        if current_path.name != "top_categories.parquet":
+            raise PreventUpdate
+            
+        # Extract category from click data
+        try:
+            # For bar charts, the category is typically in the x value
+            clicked_category = click_data["points"][0]["x"]
+            
+            # Find the top_products_by_category file
+            top_products_by_category_path = None
+            for path in _list_parquet_files(AGGREGATIONS_DIR):
+                if path.name == _TOP_PRODUCTS_BY_CATEGORY_FILENAME:
+                    top_products_by_category_path = str(path)
+                    break
+            
+            if not top_products_by_category_path:
+                raise PreventUpdate
+                
+            return top_products_by_category_path, clicked_category
+            
+        except (KeyError, IndexError, TypeError):
+            # If we can't extract the category, don't update
+            raise PreventUpdate
 
     return app
