@@ -3,7 +3,9 @@ __pycache__/
 *.py[oc]
 build/
 dist/
-data/input/
+data/input/*.csv
+data/clean/*.parquet
+data/rejected/*.csv
 wheels/
 *.egg-info
 tmp/
