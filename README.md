@@ -1,25 +1,24 @@
-# Data Pipeline Dashboard
+# Data Pipeline + Dashboard
 
 This repository hosts a lightweight data engineering pipeline that prepares a
-synthetic e-commerce sales dataset for dashboarding. The implementation avoids
-distributed compute engines (e.g. Spark) in favour of Python-only components
-that can scale via chunked processing.
+synthetic e-commerce sales dataset for dashboarding, as well as a dashboard
+application.
 
 ## Project Structure
 
+- `data_dashboard/` – Python dashboard app
 - `data_pipeline/` – core Python package
   - `generation/` – synthetic data builders
-  - `cleaning/` – CSV->parquet normalisation, validation, and anomaly flags
+  - `cleaning/` – CSV->parquet conversion, data normalisation+validation
   - `aggregations/` – metric builders that feed downstream dashboards
-- `scripts/` – CLI entry points (`generate_data`, `clean_data`, lookup builders)
 - `data/` – workspace for inputs (`input/`), cleaned parquet (`clean/`), lookups (`lookups/`), and derived outputs (`aggregations/`, `rejected/`)
+- `scripts/` – CLI entry points (`generate_data`, `clean_data`, lookup builders)
 - `tests/` – pytest coverage for cleaning and aggregation behaviour
 
 ## Quick Start
 
-The end-to-end flow will eventually be automated, but while things are in flux
-you can run each step manually. The commands below use `uv run` so the project
-virtual environment is activated automatically.
+The end-to-end flow has not been automated. The individual steps are documented below.
+The commands below use `uv run` so the project virtual environment is activated automatically.
 
 ```bash
 # 1. Generate dirty or clean synthetic input data
@@ -40,24 +39,35 @@ or tuning chunk sizes.
 
 ## Data pipeline
 
-1. **Generate raw inputs** (`scripts/generate_data.py`)
-   - Writes a raw CSV under `data/input/` using `EcommerceDataGenerator`, producing either clean test
-     fixtures or intentionally messy rows (typos, duplicate IDs, malformed fields) to exercise the pipeline.
+1. **Generate raw data** (`scripts/generate_data.py`)
+     Produces either clean data or intentionally messy rows (typos, duplicate IDs, malformed fields) to exercise the pipeline.
+
+     Outputs: a csv in `data/input/`
 2. **Clean & normalise** (`scripts/clean_data.py`)
-   - Streams the CSV in chunks, emits a cleaned parquet dataset in `data/clean/`, and (optionally) a
-     rejected-rows CSV in `data/rejected/`. Along the way it de-duplicates order IDs, canonicalises
-     categories/regions via lookup JSONs, clamps numeric ranges, parses multi-format dates, recomputes
-     revenue, and logs explicit rejection reasons.
+     Input: a csv from data/input/
+
+     Output: 
+        a cleaned parquet dataset in `data/clean/`,
+        a rejected-rows CSV in `data/rejected/`
+
+     Streams the CSV in chunks and tries to clean up the data as much as possible. This is documented further in the [Data Cleaning](#data-cleaning) section.
+
 3. **Build aggregations** (`scripts/build_aggregations.py`)
+    input: parquet in `data/clean/`
+    output: multiple parquet datasets in `data/aggregations/`
+
    - Reads the cleaned parquet and materialises monthly sales trends, top-product rankings, regional
      performance, category/discount summaries, and anomaly snapshots as parquet files inside
      `data/aggregations/`.
-4. **Explore & iterate** (`scripts/dashboard.py`)
-   - Runs a Dash app that loads aggregation parquet datasets and rejected CSVs on demand so analysts can
-     filter metrics, review anomaly reasons, and feed fixes back into lookup or cleaning rules.
 
-If the source data drifts, regenerate canonical category and region lists with:
+## Data lookup files
 
+The cleanup logic requires a list of canonical categories and regions. Since those are unavailable, it attempts to
+create one from a dirty dataset - in other words, a CSV of sales orders - either relying on heuristics or human
+intervention to canonicalize the data. See [Data Cleaning](#data-cleaning).
+
+The canonical lists are persisted and checked into the repo, but they can be regenerated with some human intervention.
+Example invocations would be:
 ```bash
 uv run build-category-lookup data/input/dirty_1m.csv
 uv run build-region-lookup data/input/dirty_1m.csv
@@ -65,18 +75,6 @@ uv run build-region-map data/input/dirty_1m.csv
 # Or run everything (with tests) in one pass
 uv run update-lookups data/input/dirty_1m.csv
 ```
-
-Each command writes a JSON file under `data/lookups/`, which doubles as a
-human-editable list—feel free to hand-fix or expand entries before the next
-cleaning run. The repository ships with a starter `region_map.json` that
-captures the most common raw-to-canonical mappings we've encountered. When you
-run the generator against new data, any unmatched values are appended with the
-`UNKNOWN` label—review those rows, decide the correct canonical region (or leave
-them as `UNKNOWN` to force rejection), and rerun the cleaner.
-
-(The motivation here is that I'm operating under an assumption that canonical names
-are not available anywhere, so they have to be generated via the raw data via different ways)
-
 
 ## Synthetic data generation
 
@@ -96,7 +94,7 @@ intentional quality issues for testing the cleaners. Field behaviour:
 - `revenue`: recomputed as `unit_price * quantity * (1 - discount)` after normalising quantity to a non-negative integer and clamping the discount between 0 and 1.
 
 
-## Data cleaning rules
+## <a name="data-cleaning">Data cleaning rules</a>
 
 The cleaner aggressively normalises fields and drops any rows that cannot be reconciled
 with our canonical category/region lists or basic business sanity checks. Expect to tune
@@ -160,8 +158,9 @@ the lookup JSONs and re-run cleaning when source feeds drift.
 
 ## Data pipeline stats
 
-These were run on a 2024 macbook air. Note that all of the scripts are (deliberately) doing serial processing.
+These were run on a 2024 macbook air. Note that all of the scripts are (deliberately) performed using a single CPU thread; all
+possible parallelism was disabled.
 
 - Generate 100M row csv: ~20 mins
-- Clean up csv, create parquet output: ~8 mins
+- Data cleanup/filtering: ~8 mins
 - Create aggregations: ~9 mins
