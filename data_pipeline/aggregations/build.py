@@ -49,6 +49,7 @@ _EMPTY_SCHEMAS: Mapping[str, list[str]] = {
         "unit_price",
         "discount_percent",
         "sale_date",
+        "anomaly_reason",
     ],
 }
 
@@ -184,23 +185,37 @@ def _category_discount_map(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _anomaly_records(df: pd.DataFrame, limit: int = 5) -> pd.DataFrame:
-    """Top 5 records with extremely high revenue"""
+    """Anomaly records with extremely high revenue or extremely high discounts"""
     logger = logging.getLogger(__name__)
-    logger.info("Identifying anomaly records with extremely high revenue...")
+    logger.info("Identifying anomaly records...")
     
     # Get top records by revenue
     top_revenue = df.nlargest(limit, 'revenue').copy()
+    top_revenue["anomaly_reason"] = "high_revenue"
+    
+    # Get top records by discount percentage
+    top_discount = df.nlargest(limit, 'discount_percent').copy()
+    top_discount["anomaly_reason"] = "high_discount"
+    
+    # Combine both types of anomalies
+    all_anomalies = pd.concat([top_revenue, top_discount], ignore_index=True)
+    
+    # Remove duplicates (records that appear in both categories)
+    all_anomalies = all_anomalies.drop_duplicates(subset=['order_id'], keep='first')
+    
+    # Take top records by combining both types, up to the limit
+    all_anomalies = all_anomalies.head(limit)
     
     # Add rank
-    top_revenue["rank"] = range(1, len(top_revenue) + 1)
+    all_anomalies["rank"] = range(1, len(all_anomalies) + 1)
     
     # Select relevant columns
     columns = [
         "rank", "order_id", "product_name", "category", "region",
-        "revenue", "quantity", "unit_price", "discount_percent", "sale_date"
+        "revenue", "quantity", "unit_price", "discount_percent", "sale_date", "anomaly_reason"
     ]
     
-    result = top_revenue[columns].copy()
+    result = all_anomalies[columns].copy()
     
     # Round values
     result["revenue"] = result["revenue"].round(2)
@@ -208,7 +223,10 @@ def _anomaly_records(df: pd.DataFrame, limit: int = 5) -> pd.DataFrame:
     result["discount_percent"] = result["discount_percent"].round(4)
     result["quantity"] = result["quantity"].astype(int)
     
-    logger.info(f"Identified {len(result)} anomaly records with revenue range: ${result['revenue'].min():.2f} - ${result['revenue'].max():.2f}")
+    revenue_count = len(result[result["anomaly_reason"] == "high_revenue"])
+    discount_count = len(result[result["anomaly_reason"] == "high_discount"])
+    logger.info(f"Identified {len(result)} anomaly records: {revenue_count} high revenue, {discount_count} high discount")
+    
     return result
 
 

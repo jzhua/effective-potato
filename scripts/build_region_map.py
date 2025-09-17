@@ -14,22 +14,7 @@ from data_pipeline.settings import DATA_DIR
 _REGION_LIST_PATH = DATA_DIR / "lookups" / "common_regions.json"
 _REGION_MAP_PATH = DATA_DIR / "lookups" / "region_map.json"
 
-_REGION_SYNONYMS = {
-    "us": "United States",
-    "u.s": "United States",
-    "u.s.": "United States",
-    "usa": "United States",
-    "united states": "United States",
-    "uk": "United Kingdom",
-    "u.k": "United Kingdom",
-    "u.k.": "United Kingdom",
-    "emea": "Europe",
-    "apac": "Asia",
-    "na": "North America",
-    "n america": "North America",
-    "latam": "South America",
-    "s america": "South America",
-}
+# Removed _REGION_SYNONYMS - now all mappings are in region_map.json
 
 
 def parse_args() -> argparse.Namespace:
@@ -122,8 +107,6 @@ def guess_region(raw_value: str, canonicals: list[str]) -> str | None:
     canonical_lookup = {value.casefold(): value for value in canonicals}
     if lowered in canonical_lookup:
         return canonical_lookup[lowered]
-    if lowered in _REGION_SYNONYMS:
-        return _REGION_SYNONYMS[lowered]
 
     best_match: tuple[str, int] | None = None
     for candidate in canonicals:

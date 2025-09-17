@@ -65,6 +65,30 @@ EMAIL_DOMAINS = [
     "workmail.com", "business.com", "corp.com", "enterprise.com", "organization.org"
 ]
 
+# Category-specific discount ranges (min_discount, max_discount, frequency)
+# Frequency represents how often discounts are applied (0.0 = never, 1.0 = always)
+CATEGORY_DISCOUNT_RANGES = {
+    "Electronics": (0.05, 0.25, 0.4),      # Tech has moderate discounts
+    "Clothing": (0.10, 0.70, 0.6),         # Fashion has frequent sales
+    "Sports": (0.05, 0.40, 0.3),           # Sports gear moderate discounts
+    "Home & Garden": (0.05, 0.50, 0.4),    # Home goods regular sales
+    "Books": (0.10, 0.30, 0.2),            # Books rarely discounted much
+    "Health & Beauty": (0.05, 0.60, 0.5),  # Beauty products frequent sales
+    "Automotive": (0.05, 0.20, 0.2),       # Auto parts rarely discounted
+    "Toys & Games": (0.10, 0.50, 0.5),     # Toys seasonal discounts
+    "Kitchen": (0.05, 0.45, 0.4),          # Kitchen appliances moderate
+    "Office": (0.05, 0.30, 0.3),           # Office supplies moderate
+    "Pet Supplies": (0.05, 0.40, 0.3),     # Pet products moderate
+    "Jewelry & Accessories": (0.10, 0.60, 0.4),  # Jewelry frequent sales
+    "Baby & Kids": (0.05, 0.40, 0.4),      # Baby products moderate
+    "Grocery & Food": (0.05, 0.30, 0.2),   # Food rarely heavily discounted
+    "Garden & Outdoor": (0.05, 0.50, 0.4), # Seasonal outdoor equipment
+    "Musical Instruments": (0.05, 0.30, 0.2),  # Instruments rarely discounted
+    "Craft & Hobby": (0.10, 0.50, 0.4),    # Craft supplies moderate
+    "Tools & Hardware": (0.05, 0.35, 0.3), # Tools moderate discounts
+    "Travel & Luggage": (0.10, 0.60, 0.4)  # Travel gear seasonal sales
+}
+
 # Date formats for varied date representation
 DATE_FORMATS = [
     "%Y-%m-%d",

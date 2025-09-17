@@ -14,9 +14,6 @@ import pyarrow.parquet as pq
 
 from data_pipeline.settings import CLEAN_OUTPUT_DIR, DATA_DIR, REJECTED_OUTPUT_DIR, ensure_directories
 
-# Common placeholder values that indicate a missing field.
-_NULLISH = {"", "null", "n/a", "na", "none", "-", "missing"}
-_NULLISH_REPLACEMENTS = {value: "" for value in _NULLISH}
 
 _CATEGORY_LOOKUP_PATH = DATA_DIR / "lookups" / "common_categories.json"
 with _CATEGORY_LOOKUP_PATH.open(encoding="utf-8") as fh:
@@ -149,7 +146,7 @@ def _normalise_string(series: pd.Series) -> pd.Series:
 
 
 def _clean_customer_email(series: pd.Series) -> pd.Series:
-    normalised = _normalise_string(series).replace(_NULLISH_REPLACEMENTS)
+    normalised = _normalise_string(series)
     emails = normalised.str.lower()
     valid_mask = emails.str.contains(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", na=False)
     return emails.where(valid_mask, other=pd.NA)
@@ -165,6 +162,27 @@ def _clean_numeric(series: pd.Series, dtype: str = "float") -> pd.Series:
 def _clean_discount(series: pd.Series) -> pd.Series:
     numeric = pd.to_numeric(series, errors="coerce").fillna(0.0)
     return numeric.clip(lower=0.0, upper=1.0)
+
+
+def _parse_multiple_date_formats(date_string: str) -> pd.Timestamp | None:
+    """Parse date string using multiple formats."""
+    if not date_string or pd.isna(date_string):
+        return None
+        
+    date_formats = [
+        "%Y-%m-%d",
+        "%m/%d/%Y", 
+        "%d-%m-%Y",
+        "%Y/%m/%d"
+    ]
+    
+    for fmt in date_formats:
+        try:
+            return pd.to_datetime(date_string, format=fmt)
+        except (ValueError, TypeError):
+            continue
+    
+    return None
 
 
 def _clean_chunk(frame: pd.DataFrame, seen_order_ids: MutableSet[str], config: CleanConfig) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -205,14 +223,17 @@ def _clean_chunk(frame: pd.DataFrame, seen_order_ids: MutableSet[str], config: C
 
     # Step 2: Remove duplicates both within the chunk and across chunks seen so far.
     before_dedup = len(data)
-    data = data.drop_duplicates(subset="order_id", keep="first")
     
-    # Track cross-chunk duplicates
+    # First handle within-chunk duplicates
+    duplicate_within_chunk_mask = ~data.duplicated(subset="order_id", keep="first")
+    data = _reject_rows(duplicate_within_chunk_mask, "duplicate_order_id")
+    
+    # Then handle cross-chunk duplicates
     duplicate_mask = ~data["order_id"].isin(seen_order_ids)
     data = _reject_rows(duplicate_mask, "duplicate_order_id")
 
     # Step 3: Standardise categorical features.
-    raw_categories = _normalise_string(data.get("category")).replace(_NULLISH_REPLACEMENTS)
+    raw_categories = _normalise_string(data.get("category"))
     resolved_categories = [_resolve_category(value) for value in raw_categories.tolist()]
     resolved_series = pd.Series(resolved_categories, index=data.index, dtype="object")
     valid_category_mask = resolved_series.notna()
@@ -225,7 +246,7 @@ def _clean_chunk(frame: pd.DataFrame, seen_order_ids: MutableSet[str], config: C
     resolved_series = resolved_series.astype("string")
     data = data.assign(category=resolved_series.loc[data.index])
 
-    raw_regions = _normalise_string(data.get("region")).replace(_NULLISH_REPLACEMENTS)
+    raw_regions = _normalise_string(data.get("region"))
     resolved_regions = [_resolve_region(value) for value in raw_regions.tolist()]
     region_series = pd.Series(resolved_regions, index=data.index, dtype="object")
     valid_region_mask = region_series.notna()
@@ -258,10 +279,8 @@ def _clean_chunk(frame: pd.DataFrame, seen_order_ids: MutableSet[str], config: C
         data = _reject_rows(zero_qty_mask, "zero_quantity")
 
     # Step 6: Parse dates, validate, and convert to Unix timestamps.
-    sale_dates = pd.to_datetime(
-        _normalise_string(data.get("sale_date")).replace(_NULLISH_REPLACEMENTS),
-        errors="coerce",
-    )
+    sale_date_strings = _normalise_string(data.get("sale_date"))
+    sale_dates = sale_date_strings.apply(_parse_multiple_date_formats)
     data["sale_date"] = sale_dates
 
     # Reject rows with invalid dates
@@ -367,14 +386,14 @@ def clean_csv_to_parquet(
     output_parquet.parent.mkdir(parents=True, exist_ok=True)
     
     # Setup rejected rows output
-    rejected_parquet = None
+    rejected_csv = None
     if cfg.save_rejected_rows:
-        rejected_parquet = REJECTED_OUTPUT_DIR / f"{input_csv.stem}_rejected.parquet"
-        rejected_parquet.parent.mkdir(parents=True, exist_ok=True)
+        rejected_csv = REJECTED_OUTPUT_DIR / f"{input_csv.stem}_rejected.csv"
+        rejected_csv.parent.mkdir(parents=True, exist_ok=True)
 
     seen_order_ids: set[str] = set()
     writer: pq.ParquetWriter | None = None
-    rejected_writer: pq.ParquetWriter | None = None
+    rejected_csv_written = False
     
     # Progress tracking
     total_input_rows = 0
@@ -386,11 +405,11 @@ def clean_csv_to_parquet(
     logger.info(f"Starting to process CSV file: {input_csv}")
     logger.info(f"Chunk size: {cfg.chunk_size:,} rows")
     logger.info(f"Save rejected rows: {cfg.save_rejected_rows}")
-    if rejected_parquet:
-        logger.info(f"Rejected rows will be saved to: {rejected_parquet}")
+    if rejected_csv:
+        logger.info(f"Rejected rows will be saved to: {rejected_csv}")
 
     try:
-        csv_reader = pd.read_csv(input_csv, chunksize=cfg.chunk_size)
+        csv_reader = pd.read_csv(input_csv, chunksize=cfg.chunk_size, keep_default_na=False, na_values=[""])
         
         for chunk_num, chunk in enumerate(csv_reader, 1):
             chunk_start = time.time()
@@ -415,14 +434,16 @@ def clean_csv_to_parquet(
                 writer.write_table(cleaned_table)
                 chunks_processed += 1
 
-            # Write rejected data
+            # Write rejected data to CSV
             if not rejected.empty and cfg.save_rejected_rows:
-                rejected_table = _to_parquet_table(rejected)
-                if rejected_writer is None:
-                    rejected_writer = pq.ParquetWriter(rejected_parquet, rejected_table.schema, compression="snappy")
-                    logger.info(f"Created rejected rows writer with schema: {len(rejected_table.schema)} columns")
-                
-                rejected_writer.write_table(rejected_table)
+                if not rejected_csv_written:
+                    # Write header on first write
+                    rejected.to_csv(rejected_csv, index=False, mode='w')
+                    rejected_csv_written = True
+                    logger.info(f"Created rejected rows CSV with {len(rejected.columns)} columns")
+                else:
+                    # Append without header
+                    rejected.to_csv(rejected_csv, index=False, mode='a', header=False)
             
             chunk_elapsed = time.time() - chunk_start
             retention_rate = (output_rows / input_rows) * 100 if input_rows > 0 else 0
@@ -444,8 +465,7 @@ def clean_csv_to_parquet(
     finally:
         if writer is not None:
             writer.close()
-        if rejected_writer is not None:
-            rejected_writer.close()
+        # No need to close anything for CSV writing
 
     elapsed = time.time() - start_time
     
@@ -478,6 +498,6 @@ def clean_csv_to_parquet(
         logger.info(f"Processing rate: {total_input_rows / elapsed:.0f} rows/second")
         
         if cfg.save_rejected_rows and total_rejected_rows > 0:
-            logger.info(f"Rejected rows saved to: {rejected_parquet}")
+            logger.info(f"Rejected rows saved to: {rejected_csv}")
 
-    return output_parquet, rejected_parquet
+    return output_parquet, rejected_csv

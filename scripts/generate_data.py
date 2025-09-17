@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import logging
 from pathlib import Path
 
 from data_pipeline.generation import EcommerceDataGenerator
@@ -29,12 +30,26 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    # Configure logging
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+    logger = logging.getLogger(__name__)
+    
     args = parse_args()
     ensure_directories()
     args.output.parent.mkdir(parents=True, exist_ok=True)
 
+    logger.info(f"Starting data generation with {args.rows} rows")
+    logger.info(f"Output file: {args.output}")
+    logger.info(f"Clean data mode: {args.clean}")
+
     generator = EcommerceDataGenerator(clean_data=args.clean)
     generator.generate_csv(str(args.output), num_rows=args.rows)
+    
+    logger.info("Data generation completed successfully")
 
 
 if __name__ == "__main__":  # pragma: no cover - CLI entry point
