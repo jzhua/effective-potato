@@ -34,8 +34,7 @@ uv run build-aggregations --cleaned data/clean/dirty_100m_clean.parquet
 uv run run-dashboard --debug
 ```
 
-All scripts accept additional flags (run with `--help`) for customising paths
-or tuning chunk sizes.
+Run the scripts with `--help` to see various additional flags.
 
 ## Data pipeline
 
