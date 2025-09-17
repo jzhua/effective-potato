@@ -30,10 +30,31 @@ uv run clean-data --input data/input/dirty_100m.csv
 
 # 3. Build aggregated parquet artefacts for the dashboard
 uv run build-aggregations --cleaned data/clean/raw_ecommerce_data_clean.parquet
+
+# 4. Launch the interactive dashboard
+uv run run-dashboard --debug
 ```
 
 All scripts accept additional flags (run with `--help`) for customising paths
 or tuning chunk sizes.
+
+## Data pipeline
+
+1. **Generate raw inputs** (`scripts/generate_data.py`)
+   - Writes a raw CSV under `data/input/` using `EcommerceDataGenerator`, producing either clean test
+     fixtures or intentionally messy rows (typos, duplicate IDs, malformed fields) to exercise the pipeline.
+2. **Clean & normalise** (`scripts/clean_data.py`)
+   - Streams the CSV in chunks, emits a cleaned parquet dataset in `data/clean/`, and (optionally) a
+     rejected-rows CSV in `data/rejected/`. Along the way it de-duplicates order IDs, canonicalises
+     categories/regions via lookup JSONs, clamps numeric ranges, parses multi-format dates, recomputes
+     revenue, and logs explicit rejection reasons.
+3. **Build aggregations** (`scripts/build_aggregations.py`)
+   - Reads the cleaned parquet and materialises monthly sales trends, top-product rankings, regional
+     performance, category/discount summaries, and anomaly snapshots as parquet files inside
+     `data/aggregations/`.
+4. **Explore & iterate** (`scripts/dashboard.py`)
+   - Runs a Dash app that loads aggregation parquet datasets and rejected CSVs on demand so analysts can
+     filter metrics, review anomaly reasons, and feed fixes back into lookup or cleaning rules.
 
 If the source data drifts, regenerate canonical category and region lists with:
 
@@ -123,17 +144,6 @@ the lookup JSONs and re-run cleaning when source feeds drift.
 - Rejected rows (with their `rejection_reason`) are written to `data/rejected/` when `CleanConfig.save_rejected_rows` remains enabled, making it easier to inspect edge cases and extend lookup logic.
 
 
-
-
-## Dashboard
-
-Launch the exploratory dashboard once aggregations exist to review trends and track records that need human intervention.
-
-```bash
-uv run run-dashboard
-```
-
-The `data-dashboard` app (source in `data_dashboard/`) reads parquet files directly from `data/aggregations/` on every refresh and surfaces rejected CSVs from `data/rejected/`. As new aggregation artefacts are added, they appear automatically in the “Aggregations Explorer” tab, while anomaly records and rejected orders are reviewed separately in the “Anomalies & Rejections” tab.
 
 ## Roadmap
 
