@@ -150,10 +150,8 @@ The `data-dashboard` app (source in `data_dashboard/`) reads parquet files direc
 
 ## Data pipeline stats
 
-These were run on a 2024 macbook air. Note that none of these scripts are parallelized right now.
+These were run on a 2024 macbook air. Note that all of the scripts are (deliberately) doing serial processing.
 
 - Generate 100M row csv: ~20 mins
-- Clean up csv, create cleaned parquet: ??? mins
-- Create aggregations: ??? mins
-
-
+- Clean up csv, create parquet output: ~8 mins
+- Create aggregations: ~9 mins
