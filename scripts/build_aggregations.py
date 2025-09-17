@@ -25,10 +25,10 @@ def parse_args() -> argparse.Namespace:
         help="Destination directory for the aggregation parquet files.",
     )
     parser.add_argument(
-        "--top-products",
+        "--top-products-by-category",
         type=int,
-        default=10,
-        help="Number of top products to include in rankings (default: 10).",
+        default=5,
+        help="Number of top products per category to include in rankings (default: 5).",
     )
     parser.add_argument(
         "--anomaly-limit",
@@ -65,7 +65,7 @@ def main() -> None:
     logger.info("Starting aggregation build process")
     logger.info(f"Input file: {args.cleaned}")
     logger.info(f"Output directory: {args.output}")
-    logger.info(f"Top products limit: {args.top_products}")
+    logger.info(f"Top products by category limit: {args.top_products_by_category}")
     logger.info(f"Anomaly records limit: {args.anomaly_limit}")
     
     # Get input file size
@@ -79,7 +79,7 @@ def main() -> None:
         result_files = build_all_aggregations(
             args.cleaned, 
             args.output, 
-            top_products_limit=args.top_products,
+            top_products_limit=args.top_products_by_category,
             anomaly_limit=args.anomaly_limit
         )
         elapsed = time.time() - start_time

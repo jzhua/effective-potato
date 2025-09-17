@@ -5,9 +5,9 @@ from data_pipeline.aggregations import build_all_aggregations
 
 EXPECTED_FILES = {
     "monthly_sales_summary",
-    "top_products",
+    "top_products_by_category",
     "region_wise_performance",
-    "category_discount_map",
+    "top_categories",
     "anomaly_records",
 }
 
@@ -43,8 +43,9 @@ def test_build_all_aggregations_produces_expected_outputs(tmp_path):
     assert list(monthly_summary["month"]) == ["2023-01"]
     assert float(monthly_summary.loc[0, "total_revenue"]) == 30000000.0  # 100000 * 300.0
 
-    top_products = pd.read_parquet(results["top_products"])
-    assert {"revenue", "units"} == set(top_products["metric_type"])  # both rankings present
+    category_best = pd.read_parquet(results["top_products_by_category"])
+    assert {"revenue", "units"} == set(category_best["metric_type"])
+    assert {"Electronics"} == set(category_best["category"])
 
     anomalies = pd.read_parquet(results["anomaly_records"])
     assert len(anomalies) >= 1  # Should have at least 1 anomaly

@@ -11,6 +11,10 @@ import pandas as pd
 import pyarrow.parquet as pq
 import pyarrow as pa
 
+# Configure PyArrow to use single CPU core
+pa.set_cpu_count(1)
+pa.set_io_thread_count(1)
+
 from data_pipeline.settings import AGGREGATIONS_DIR, ensure_directories
 
 _EMPTY_SCHEMAS: Mapping[str, list[str]] = {
@@ -21,13 +25,14 @@ _EMPTY_SCHEMAS: Mapping[str, list[str]] = {
         "avg_discount_percent",
         "order_count",
     ],
-    "top_products": [
+    "top_products_by_category": [
+        "category",
         "rank",
         "product_name",
         "total_revenue",
         "total_quantity",
         "order_count",
-        "metric_type",  # 'revenue' or 'units'
+        "metric_type",
     ],
     "region_wise_performance": [
         "region",
@@ -36,7 +41,7 @@ _EMPTY_SCHEMAS: Mapping[str, list[str]] = {
         "order_count",
         "avg_order_value",
     ],
-    "category_discount_map": [
+    "top_categories": [
         "category",
         "avg_discount_percent",
         "order_count",
@@ -179,70 +184,89 @@ def _monthly_sales_summary(df: pd.DataFrame) -> pd.DataFrame:
     return result
 
 
-def _top_products_chunked(parquet_path: Path, limit: int = 10) -> pd.DataFrame:
-    """Chunked top products by revenue and units using heaps for efficiency"""
+
+
+def _top_products_by_category_chunked(parquet_path: Path, limit: int = 5) -> pd.DataFrame:
+    """Chunked best sellers per category by revenue and units."""
     logger = logging.getLogger(__name__)
-    logger.info("Building top products by revenue and units (chunked)...")
-    
-    product_totals = defaultdict(lambda: {
-        'total_revenue': 0.0,
-        'total_quantity': 0.0,
-        'order_ids': set()
-    })
-    
+    logger.info("Building category best sellers (chunked)...")
+
+    category_product_totals = defaultdict(
+        lambda: {"total_revenue": 0.0, "total_quantity": 0.0, "order_ids": set()}
+    )
+
     total_rows = 0
     for chunk_num, chunk in enumerate(_iter_parquet_chunks(parquet_path), 1):
         total_rows += len(chunk)
-        
-        # Aggregate by product within this chunk
-        for product, group in chunk.groupby('product_name'):
-            product_totals[product]['total_revenue'] += group['revenue'].sum()
-            product_totals[product]['total_quantity'] += group['quantity'].sum()
-            product_totals[product]['order_ids'].update(group['order_id'].tolist())
-        
-        # Progress logging is now handled by _iter_parquet_chunks
-    
-    # Convert to list and get top products
-    products_list = []
-    for product, data in product_totals.items():
-        products_list.append({
-            'product_name': product,
-            'total_revenue': data['total_revenue'],
-            'total_quantity': data['total_quantity'],
-            'order_count': len(data['order_ids'])
-        })
-    
-    products_df = pd.DataFrame(products_list)
-    
-    # Top N by revenue
-    top_by_revenue = products_df.nlargest(limit, 'total_revenue').copy()
-    top_by_revenue["rank"] = range(1, len(top_by_revenue) + 1)
-    top_by_revenue["metric_type"] = "revenue"
-    
-    # Top N by units
-    top_by_units = products_df.nlargest(limit, 'total_quantity').copy()
-    top_by_units["rank"] = range(1, len(top_by_units) + 1)
-    top_by_units["metric_type"] = "units"
-    
-    # Combine both rankings
-    result = pd.concat([top_by_revenue, top_by_units], ignore_index=True)
-    
-    # Round values
+
+        for (category, product), group in chunk.groupby(["category", "product_name"]):
+            entry = category_product_totals[(category, product)]
+            entry["total_revenue"] += group["revenue"].sum()
+            entry["total_quantity"] += group["quantity"].sum()
+            entry["order_ids"].update(group["order_id"].tolist())
+
+    if not category_product_totals:
+        return pd.DataFrame(columns=_EMPTY_SCHEMAS["top_products_by_category"])
+
+    aggregated = pd.DataFrame(
+        {
+            "category": category,
+            "product_name": product,
+            "total_revenue": data["total_revenue"],
+            "total_quantity": data["total_quantity"],
+            "order_count": len(data["order_ids"]),
+        }
+        for (category, product), data in category_product_totals.items()
+    )
+
+    result_frames = []
+    for category, group in aggregated.groupby("category"):
+        top_by_revenue = group.nlargest(limit, "total_revenue").copy()
+        top_by_revenue["rank"] = range(1, len(top_by_revenue) + 1)
+        top_by_revenue["metric_type"] = "revenue"
+
+        top_by_units = group.nlargest(limit, "total_quantity").copy()
+        top_by_units["rank"] = range(1, len(top_by_units) + 1)
+        top_by_units["metric_type"] = "units"
+
+        result_frames.append(top_by_revenue)
+        result_frames.append(top_by_units)
+
+    if not result_frames:
+        return pd.DataFrame(columns=_EMPTY_SCHEMAS["top_products_by_category"])
+
+    result = pd.concat(result_frames, ignore_index=True)
     result["total_revenue"] = result["total_revenue"].round(2)
     result["total_quantity"] = result["total_quantity"].astype(int)
-    
-    logger.info(f"Generated top {limit} products by revenue and {limit} by units from {total_rows:,} rows")
-    return result
+
+    logger.info(
+        "Generated category best sellers for %d categories from %s rows",
+        aggregated["category"].nunique(),
+        f"{total_rows:,}",
+    )
+
+    return result[
+        [
+            "category",
+            "rank",
+            "product_name",
+            "total_revenue",
+            "total_quantity",
+            "order_count",
+            "metric_type",
+        ]
+    ]
 
 
-def _top_products(df: pd.DataFrame, limit: int = 10) -> pd.DataFrame:
-    """Top 10 products by revenue and units (legacy)"""
+
+
+def _top_products_by_category(df: pd.DataFrame, limit: int = 5) -> pd.DataFrame:
+    """Best sellers per category by revenue and units."""
     logger = logging.getLogger(__name__)
-    logger.info("Building top products by revenue and units...")
-    
-    # Group by product
+    logger.info("Building category best sellers...")
+
     grouped = (
-        df.groupby("product_name")
+        df.groupby(["category", "product_name"])
         .agg(
             total_revenue=("revenue", "sum"),
             total_quantity=("quantity", "sum"),
@@ -250,26 +274,46 @@ def _top_products(df: pd.DataFrame, limit: int = 10) -> pd.DataFrame:
         )
         .reset_index()
     )
-    
-    # Top 10 by revenue
-    top_by_revenue = grouped.sort_values("total_revenue", ascending=False).head(limit).copy()
-    top_by_revenue["rank"] = range(1, len(top_by_revenue) + 1)
-    top_by_revenue["metric_type"] = "revenue"
-    
-    # Top 10 by units
-    top_by_units = grouped.sort_values("total_quantity", ascending=False).head(limit).copy()
-    top_by_units["rank"] = range(1, len(top_by_units) + 1)
-    top_by_units["metric_type"] = "units"
-    
-    # Combine both rankings
-    result = pd.concat([top_by_revenue, top_by_units], ignore_index=True)
-    
-    # Round values
+
+    if grouped.empty:
+        return pd.DataFrame(columns=_EMPTY_SCHEMAS["top_products_by_category"])
+
+    result_frames = []
+    for category, group in grouped.groupby("category"):
+        top_by_revenue = group.sort_values("total_revenue", ascending=False).head(limit).copy()
+        top_by_revenue["rank"] = range(1, len(top_by_revenue) + 1)
+        top_by_revenue["metric_type"] = "revenue"
+
+        top_by_units = group.sort_values("total_quantity", ascending=False).head(limit).copy()
+        top_by_units["rank"] = range(1, len(top_by_units) + 1)
+        top_by_units["metric_type"] = "units"
+
+        result_frames.append(top_by_revenue)
+        result_frames.append(top_by_units)
+
+    if not result_frames:
+        return pd.DataFrame(columns=_EMPTY_SCHEMAS["top_products_by_category"])
+
+    result = pd.concat(result_frames, ignore_index=True)
     result["total_revenue"] = result["total_revenue"].round(2)
     result["total_quantity"] = result["total_quantity"].astype(int)
-    
-    logger.info(f"Generated top {limit} products by revenue and {limit} by units")
-    return result
+
+    logger.info(
+        "Generated category best sellers for %d categories",
+        grouped["category"].nunique(),
+    )
+
+    return result[
+        [
+            "category",
+            "rank",
+            "product_name",
+            "total_revenue",
+            "total_quantity",
+            "order_count",
+            "metric_type",
+        ]
+    ]
 
 
 def _region_wise_performance_chunked(parquet_path: Path) -> pd.DataFrame:
@@ -340,7 +384,7 @@ def _region_wise_performance(df: pd.DataFrame) -> pd.DataFrame:
     return result
 
 
-def _category_discount_map_chunked(parquet_path: Path) -> pd.DataFrame:
+def _top_categories_chunked(parquet_path: Path) -> pd.DataFrame:
     """Chunked average discount by category"""
     logger = logging.getLogger(__name__)
     logger.info("Building category discount mapping (chunked)...")
@@ -448,7 +492,7 @@ def _anomaly_records_chunked(parquet_path: Path, limit: int = 5) -> pd.DataFrame
     return result
 
 
-def _category_discount_map(df: pd.DataFrame) -> pd.DataFrame:
+def _top_categories(df: pd.DataFrame) -> pd.DataFrame:
     """Average discount by category (legacy)"""
     logger = logging.getLogger(__name__)
     logger.info("Building category discount mapping...")
@@ -521,18 +565,18 @@ def _anomaly_records(df: pd.DataFrame, limit: int = 5) -> pd.DataFrame:
 # Chunked aggregation builders for large datasets (uses PyArrow streaming)
 _CHUNKED_AGGREGATION_BUILDERS: Mapping[str, Callable[..., pd.DataFrame]] = {
     "monthly_sales_summary": _monthly_sales_summary_chunked,
-    "top_products": _top_products_chunked,
+    "top_products_by_category": _top_products_by_category_chunked,
     "region_wise_performance": _region_wise_performance_chunked,
-    "category_discount_map": _category_discount_map_chunked,
+    "top_categories": _top_categories_chunked,
     "anomaly_records": _anomaly_records_chunked,
 }
 
 # Legacy aggregation builders for smaller datasets (loads all data into memory)
 _AGGREGATION_BUILDERS: Mapping[str, Callable[..., pd.DataFrame]] = {
     "monthly_sales_summary": _monthly_sales_summary,
-    "top_products": _top_products,
+    "top_products_by_category": _top_products_by_category,
     "region_wise_performance": _region_wise_performance,
-    "category_discount_map": _category_discount_map,
+    "top_categories": _top_categories,
     "anomaly_records": _anomaly_records,
 }
 
@@ -553,16 +597,15 @@ def build_all_aggregations(
     Args:
         clean_parquet: Path to cleaned parquet file
         output_dir: Output directory for aggregation files
-        top_products_limit: Number of top products to include
         anomaly_limit: Number of anomaly records to identify
         force_chunked: Force chunked processing regardless of file size
         chunk_threshold_gb: File size threshold (GB) to trigger chunked processing
     
     Generates the following aggregation files:
     - monthly_sales_summary.parquet: Revenue, quantity, avg discount by month
-    - top_products.parquet: Top N by revenue and units  
+    - top_products_by_category.parquet: Category best sellers by revenue and units
     - region_wise_performance.parquet: Sales by region
-    - category_discount_map.parquet: Avg discount by category
+    - top_categories.parquet: Top categories by various metrics
     - anomaly_records.parquet: Top N records with extremely high revenue
     """
     logger = logging.getLogger(__name__)
@@ -605,7 +648,7 @@ def build_all_aggregations(
             start_time = time.time()
             
             # Pass appropriate arguments to chunked functions
-            if name == "top_products":
+            if name == "top_products_by_category":
                 data = builder(clean_parquet, limit=top_products_limit)
             elif name == "anomaly_records":
                 data = builder(clean_parquet, limit=anomaly_limit)
@@ -647,7 +690,7 @@ def build_all_aggregations(
             logger.info(f"Building aggregation: {name}")
             
             # Pass appropriate limits to functions that need them
-            if name == "top_products":
+            if name == "top_products_by_category":
                 data = builder(frame, limit=top_products_limit)
             elif name == "anomaly_records":
                 data = builder(frame, limit=anomaly_limit)
