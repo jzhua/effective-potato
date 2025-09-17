@@ -22,13 +22,13 @@ The commands below use `uv run` so the project virtual environment is activated 
 
 ```bash
 # 1. Generate dirty or clean synthetic input data
-uv run generate-data --rows 100000
+uv run generate-data --rows 100000000
 
 # 2. Clean the raw CSV into a parquet dataset
 uv run clean-data --input data/input/dirty_100m.csv
 
 # 3. Build aggregated parquet artefacts for the dashboard
-uv run build-aggregations --cleaned data/clean/raw_ecommerce_data_clean.parquet
+uv run build-aggregations --cleaned data/clean/dirty_100m_clean.parquet
 
 # 4. Launch the interactive dashboard
 uv run run-dashboard --debug
