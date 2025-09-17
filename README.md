@@ -57,6 +57,24 @@ them as `UNKNOWN` to force rejection), and rerun the cleaner.
 are not available anywhere, so they have to be generated via the raw data via different ways)
 
 
+## Synthetic data generation
+
+The generator in `scripts/generate_data.py` builds each row using a product catalogue and
+category-specific settings. Passing `--clean` keeps values consistent; omitting it introduces
+intentional quality issues for testing the cleaners. Field behaviour:
+
+- `order_id`: sequential `ORD-#########` strings; in dirty mode ~1% re-use a recently generated ID to create duplicates.
+- `product_name`: sampled from curated variations per base product; dirty runs add typos to ~5% of names.
+- `category`: follows the product’s canonical category. Dirty data stays correct ~90% of the time, sprinkles typos on 20% of those rows, and mislabels the rest using random categories.
+- `quantity`: drawn from product-specific distributions. Clean data sticks to positive integers; dirty data mixes in zero, negative, oversized, and non-numeric tokens (e.g. `"two"`, `"many"`).
+- `unit_price`: derived from the category’s price band (see `CATEGORY_PRICE_RANGES`) with a bias toward cheaper brackets; values are rounded to cents.
+- `discount_percent`: uses `CATEGORY_DISCOUNT_RANGES` to decide both the odds of a discount and its range. Dirty runs occasionally emit extreme values (85–99% off) and about 1% outright bad numbers (negative or >1).
+- `region`: random choice from `REGIONS`, which intentionally mixes canonical names with common typos (`"north america"`, `"Aisa"`, etc.).
+- `sale_date`: spans the last ~2 years with recent dates favoured and seasonal nudges; dirty mode mixes in blanks and multiple formats, while clean mode sticks to ISO `YYYY-MM-DD`.
+- `customer_email`: built from cached first/last names plus common domains. Dirty data leaves ~15% blank and introduces malformed addresses (~5%).
+- `revenue`: recomputed as `unit_price * quantity * (1 - discount)` after normalising quantity to a non-negative integer and clamping the discount between 0 and 1.
+
+
 ## Data cleaning rules
 
 The cleaner aggressively normalises fields and drops any rows that cannot be reconciled
@@ -130,4 +148,12 @@ The `data-dashboard` app (source in `data_dashboard/`) reads parquet files direc
 - Key dependencies: `pandas`, `pyarrow`, `psutil`
 - Data files are ignored by version control; generate them locally per run
 
-Further documentation will be added as the pipeline and dashboard mature.
+## Data pipeline stats
+
+These were run on a 2024 macbook air. Note that none of these scripts are parallelized right now.
+
+- Generate 100M row csv: ~20 mins
+- Clean up csv, create cleaned parquet: ??? mins
+- Create aggregations: ??? mins
+
+

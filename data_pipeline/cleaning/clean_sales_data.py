@@ -164,24 +164,72 @@ def _clean_discount(series: pd.Series) -> pd.Series:
     return numeric.clip(lower=0.0, upper=1.0)
 
 
+# Cache for date parsing - key: date_string, value: (format_index, parsed_date)
+_date_cache = {}
+_date_formats = [
+    "%Y-%m-%d",
+    "%m/%d/%Y", 
+    "%d-%m-%Y",
+    "%Y/%m/%d"
+]
+
 def _parse_multiple_date_formats(date_string: str) -> pd.Timestamp | None:
-    """Parse date string using multiple formats."""
+    """Parse date string using multiple formats with caching and pattern recognition."""
     if not date_string or pd.isna(date_string):
         return None
-        
-    date_formats = [
-        "%Y-%m-%d",
-        "%m/%d/%Y", 
-        "%d-%m-%Y",
-        "%Y/%m/%d"
-    ]
     
-    for fmt in date_formats:
+    # Check cache first
+    if date_string in _date_cache:
+        format_idx, cached_date = _date_cache[date_string]
+        return cached_date
+    
+    # Fast pattern matching before expensive parsing
+    str_len = len(date_string)
+    if str_len == 10:
+        if date_string[4] == '-' and date_string[7] == '-':
+            # Pattern: YYYY-MM-DD
+            try:
+                result = pd.to_datetime(date_string, format=_date_formats[0])
+                _date_cache[date_string] = (0, result)
+                return result
+            except (ValueError, TypeError):
+                pass
+        elif date_string[2] == '/' and date_string[5] == '/':
+            # Pattern: MM/DD/YYYY
+            try:
+                result = pd.to_datetime(date_string, format=_date_formats[1])
+                _date_cache[date_string] = (1, result)
+                return result
+            except (ValueError, TypeError):
+                pass
+        elif date_string[2] == '-' and date_string[5] == '-':
+            # Pattern: DD-MM-YYYY
+            try:
+                result = pd.to_datetime(date_string, format=_date_formats[2])
+                _date_cache[date_string] = (2, result)
+                return result
+            except (ValueError, TypeError):
+                pass
+        elif date_string[4] == '/' and date_string[7] == '/':
+            # Pattern: YYYY/MM/DD
+            try:
+                result = pd.to_datetime(date_string, format=_date_formats[3])
+                _date_cache[date_string] = (3, result)
+                return result
+            except (ValueError, TypeError):
+                pass
+    
+    # Fallback to original method for edge cases
+    for i, fmt in enumerate(_date_formats):
         try:
-            return pd.to_datetime(date_string, format=fmt)
+            result = pd.to_datetime(date_string, format=fmt)
+            _date_cache[date_string] = (i, result)
+            return result
         except (ValueError, TypeError):
             continue
     
+    # Cache failures too to avoid repeated parsing attempts
+    _date_cache[date_string] = (-1, None)
     return None
 
 
@@ -228,8 +276,23 @@ def _clean_chunk(frame: pd.DataFrame, seen_order_ids: MutableSet[str], config: C
     duplicate_within_chunk_mask = ~data.duplicated(subset="order_id", keep="first")
     data = _reject_rows(duplicate_within_chunk_mask, "duplicate_order_id")
     
-    # Then handle cross-chunk duplicates
-    duplicate_mask = ~data["order_id"].isin(seen_order_ids)
+    # Then handle cross-chunk duplicates using efficient set operations
+    if seen_order_ids:
+        # Use native Python set operations to preserve O(1) lookup
+        chunk_order_ids = set(data["order_id"])
+        duplicate_order_ids = chunk_order_ids & seen_order_ids  # Fast set intersection
+        
+        # Create boolean mask using vectorized operations
+        if duplicate_order_ids:
+            # Only compute mask if there are actual duplicates
+            duplicate_mask = ~data["order_id"].apply(lambda x: x in duplicate_order_ids)
+        else:
+            # No duplicates found, keep all rows
+            duplicate_mask = pd.Series([True] * len(data), index=data.index)
+    else:
+        # No previous order IDs to check against
+        duplicate_mask = pd.Series([True] * len(data), index=data.index)
+    
     data = _reject_rows(duplicate_mask, "duplicate_order_id")
 
     # Step 3: Standardise categorical features.
