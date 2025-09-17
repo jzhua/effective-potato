@@ -11,6 +11,8 @@ requires-python = ">=3.10"
 dependencies = [
     "pandas>=2.2.0",
     "pyarrow>=14.0.0",
+    "dash>=2.14.0",
+    "plotly>=5.18.0",
 ]
 
 [project.scripts]
@@ -21,9 +23,10 @@ build-category-lookup = "scripts.build_category_lookup:main"
 build-region-lookup = "scripts.build_region_lookup:main"
 build-region-map = "scripts.build_region_map:main"
 update-lookups = "scripts.update_lookups:main"
+run-dashboard = "scripts.dashboard:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["data_pipeline", "scripts"]
+packages = ["data_pipeline", "data_dashboard", "scripts"]
 
 [tool.uv]
 dev-dependencies = [
