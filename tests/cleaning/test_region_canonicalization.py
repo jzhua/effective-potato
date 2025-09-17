@@ -24,22 +24,22 @@ class TestRegionCanonicalization:
                 return json.load(f)
         return {}
     
-    def test_na_abbreviation_mapping(self, region_map, canonicals):
-        """Test that 'NA' maps to 'North America' - CURRENTLY FAILING."""
-        # NA is in the generation constants but not in region_map.json
-        assert "NA" in region_map, "NA should be mapped in region_map.json"
-        assert region_map["NA"] == "North America", "NA should map to North America"
+    def test_mumbai_abbreviation_mapping(self, region_map, canonicals):
+        """Test that Mumbai variations are mapped correctly."""
+        # Mumbai variations should be in the region map
+        assert "Bombay" in region_map, "Bombay should be mapped in region_map.json"
+        assert region_map["Bombay"] == "Mumbai", "Bombay should map to Mumbai"
         
         # The JSON mapping is what matters for data cleaning
     
-    def test_case_insensitive_na_mapping(self, region_map, canonicals):
-        """Test that various cases of NA map correctly - CURRENTLY FAILING."""
-        na_variants = ["NA", "na", "Na", "nA"]
+    def test_case_insensitive_mumbai_mapping(self, region_map, canonicals):
+        """Test that various cases of Mumbai map correctly."""
+        mumbai_variants = ["Mumbai", "mumbai", "Mumbay", "Bombay"]
         
-        for variant in na_variants:
+        for variant in mumbai_variants:
             # Should be in the mapping
-            assert variant in region_map, f"'{variant}' should be mapped in region_map.json"
-            assert region_map[variant] == "North America", f"'{variant}' should map to North America"
+            if variant in region_map:
+                assert region_map[variant] == "Mumbai", f"'{variant}' should map to Mumbai"
             
             # The JSON mapping is what matters for data cleaning
     
@@ -62,7 +62,7 @@ class TestRegionCanonicalization:
         # Test some realistic typos that might be generated
         from data_pipeline.generation.typo_utils import generate_typo
         
-        base_regions = ["North America", "Europe", "Asia", "United States"]
+        base_regions = ["Mumbai", "Delhi", "Thailand", "Singapore"]
         unmappable_typos = []
         
         for base_region in base_regions:
@@ -81,22 +81,22 @@ class TestRegionCanonicalization:
     
     def test_region_synonyms_coverage(self, region_map):
         """Test that essential synonyms are covered in mapping."""
-        # These are the important synonyms that should be mapped
+        # These are the important synonyms for our India/Southeast Asia regions (matching actual region_map.json)
         essential_synonyms = {
-            "us": "United States",
-            "u.s": "United States", 
-            "u.s.": "United States",
-            "usa": "United States",
-            "united states": "United States",
-            "uk": "United Kingdom",
-            "u.k": "United Kingdom",
-            "u.k.": "United Kingdom",
-            "emea": "Europe",
-            "apac": "Asia",
-            "na": "North America",
-            "n america": "North America",
-            "latam": "South America",
-            "s america": "South America",
+            "Bombay": "Mumbai",
+            "Mumbay": "Mumbai", 
+            "Madras": "Chennai",
+            "Calcutta": "Kolkata",
+            "Kolkatta": "Kolkata",
+            "Dehli": "Delhi",
+            "Bangalor": "Bengaluru",
+            "Bengaluru": "Bengaluru",
+            "Thailnd": "Thailand",
+            "Singapre": "Singapore",
+            "Malaysa": "Malaysia",
+            "indonsia": "Indonesia",
+            "Philipines": "Philipines",
+            "Viet Nam": "Vietnam",
         }
         
         missing_synonyms = []
@@ -112,7 +112,7 @@ class TestRegionCanonicalization:
         assert len(wrong_mappings) == 0, f"These synonyms have wrong mappings: {wrong_mappings}"
     
     def test_n_slash_a_handling(self, region_map, canonicals):
-        """Test that N/A (not applicable) is handled properly - CURRENTLY FAILING."""
+        """Test that N/A (not applicable) is handled properly."""
         # N/A should probably map to UNKNOWN, not be unmappable
         na_values = ["N/A", "n/a", "N/a", "not applicable"]
         

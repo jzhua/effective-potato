@@ -13,7 +13,7 @@ def test_clean_csv_to_parquet_converts_sale_date_to_unix(tmp_path):
             "quantity": [2, 2],
             "unit_price": [9.99, 9.99],
             "discount_percent": [0.1, 0.9],
-            "region": ["North America", "North America"],
+            "region": ["Mumbai", "Mumbai"],
             "sale_date": ["2023-01-01", "not-a-date"],
             "customer_email": ["customer@example.com", "customer@example.com"],
         }
@@ -45,7 +45,7 @@ def test_clean_csv_rejects_unknown_category(tmp_path):
             "quantity": [1],
             "unit_price": [10.0],
             "discount_percent": [0.0],
-            "region": ["North America"],
+            "region": ["Mumbai"],
             "sale_date": ["2023-01-01"],
             "customer_email": ["customer@example.com"],
         }
@@ -87,7 +87,7 @@ def test_category_fuzzy_lookup(tmp_path, monkeypatch):
             "quantity": [1],
             "unit_price": [150.0],
             "discount_percent": [0.0],
-            "region": ["North America"],
+            "region": ["Mumbai"],
             "sale_date": ["2023-02-01"],
             "customer_email": ["customer@example.com"],
         }
@@ -116,7 +116,7 @@ def test_heavy_discount_flagged_as_anomaly(tmp_path):
             "quantity": [1],
             "unit_price": [100.0],
             "discount_percent": [0.85],
-            "region": ["North America"],
+            "region": ["Mumbai"],
             "sale_date": ["2023-03-01"],
             "customer_email": ["customer@example.com"],
         }
@@ -176,7 +176,7 @@ def _patch_region_map(monkeypatch, mapping: dict[str, str]) -> None:
 
 def test_region_mapping_lookup(tmp_path, monkeypatch):
     mapping = dict(clean_sales_data._REGION_MAP)
-    mapping["north ameria"] = "North America"
+    mapping["mumbay"] = "Mumbai"
     _patch_region_map(monkeypatch, mapping)
 
     raw_frame = pd.DataFrame(
@@ -187,7 +187,7 @@ def test_region_mapping_lookup(tmp_path, monkeypatch):
             "quantity": [1],
             "unit_price": [10.0],
             "discount_percent": [0.0],
-            "region": ["north ameria"],
+            "region": ["mumbay"],
             "sale_date": ["2023-04-01"],
             "customer_email": ["customer@example.com"],
         }
@@ -203,14 +203,14 @@ def test_region_mapping_lookup(tmp_path, monkeypatch):
     )
 
     cleaned = pd.read_parquet(output_path)
-    assert cleaned.loc[0, "region"] == "North America"
+    assert cleaned.loc[0, "region"] == "Mumbai"
 
 
 def test_region_acronym_lookup(tmp_path, monkeypatch):
     mapping = {
-        "United States": "United States",
-        "US": "United States",
-        "U.S.": "United States",
+        "Thailand": "Thailand",
+        "TH": "Thailand",
+        "Thailnd": "Thailand",
     }
     _patch_region_map(monkeypatch, mapping)
 
@@ -222,7 +222,7 @@ def test_region_acronym_lookup(tmp_path, monkeypatch):
             "quantity": [1],
             "unit_price": [10.0],
             "discount_percent": [0.0],
-            "region": ["US"],
+            "region": ["TH"],
             "sale_date": ["2023-05-01"],
             "customer_email": ["customer@example.com"],
         }
@@ -238,4 +238,4 @@ def test_region_acronym_lookup(tmp_path, monkeypatch):
     )
 
     cleaned = pd.read_parquet(output_path)
-    assert cleaned.loc[0, "region"] == "United States"
+    assert cleaned.loc[0, "region"] == "Thailand"

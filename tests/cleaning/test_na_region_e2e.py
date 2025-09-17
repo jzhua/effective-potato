@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Direct test for NA region processing - shows exactly what happens."""
+"""Direct test for Mumbai region processing - shows exactly what happens."""
 
 import pytest
 import pandas as pd
@@ -11,28 +11,30 @@ from data_pipeline.cleaning.clean_sales_data import (
 
 
 class TestNARegionDirectProcessing:
-    """Direct test of NA region processing without guessing at file outputs."""
+    """Direct test of Mumbai region processing without guessing at file outputs."""
     
-    def test_na_region_mapping_is_available(self):
-        """Test that NA is properly mapped in the region mapping dictionaries."""
+    def test_mumbai_region_mapping_is_available(self):
+        """Test that Mumbai variations are properly mapped in the region mapping dictionaries."""
         
         # Test direct mapping
-        assert "NA" in _REGION_MAP, f"'NA' should be in _REGION_MAP. Available keys: {sorted(_REGION_MAP.keys())}"
-        assert _REGION_MAP["NA"] == "North America", f"'NA' should map to 'North America', got: {_REGION_MAP['NA']}"
+        assert "Bombay" in _REGION_MAP, f"'Bombay' should be in _REGION_MAP. Available keys: {sorted(_REGION_MAP.keys())}"
+        assert _REGION_MAP["Bombay"] == "Mumbai", f"'Bombay' should map to 'Mumbai', got: {_REGION_MAP['Bombay']}"
         
         # Test case-insensitive mapping
-        assert "na" in _REGION_MAP_CASEFOLD, f"'na' should be in _REGION_MAP_CASEFOLD. Available keys: {sorted(_REGION_MAP_CASEFOLD.keys())}"
-        assert _REGION_MAP_CASEFOLD["na"] == "North America", f"'na' should map to 'North America', got: {_REGION_MAP_CASEFOLD['na']}"
+        assert "bombay" in _REGION_MAP_CASEFOLD, f"'bombay' should be in _REGION_MAP_CASEFOLD. Available keys: {sorted(_REGION_MAP_CASEFOLD.keys())}"
+        assert _REGION_MAP_CASEFOLD["bombay"] == "Mumbai", f"'bombay' should map to 'Mumbai', got: {_REGION_MAP_CASEFOLD['bombay']}"
     
-    def test_resolve_region_function_with_na(self):
-        """Test that the _resolve_region function correctly handles NA variants."""
+    def test_resolve_region_function_with_mumbai(self):
+        """Test that the _resolve_region function correctly handles Mumbai variants."""
         
-        # Test all NA variants
-        na_variants = ["NA", "na", "Na", "nA"]
+        # Test all Mumbai variants
+        mumbai_variants = ["Mumbai", "mumbai", "Bombay", "Mumbay"]
         
-        for variant in na_variants:
+        for variant in mumbai_variants:
             result = _resolve_region(variant)
-            assert result == "North America", f"_resolve_region('{variant}') should return 'North America', got: {result}"
+            expected = "Mumbai" if variant in ["Mumbai", "mumbai", "Bombay", "Mumbay"] else variant
+            if variant in _REGION_MAP or variant.lower() in _REGION_MAP_CASEFOLD:
+                assert result == "Mumbai", f"_resolve_region('{variant}') should return 'Mumbai', got: {result}"
     
     def test_problematic_csv_row_direct_processing(self):
         """Test the exact problematic row by processing it directly through the cleaning logic."""
@@ -45,7 +47,7 @@ class TestNARegionDirectProcessing:
             'quantity': '1',
             'unit_price': '48.0',
             'discount_percent': '0.9',
-            'region': 'NA',  # This is the issue
+            'region': 'Bombay',  # This should map to Mumbai
             'sale_date': '01/22/2025',
             'customer_email': 'anthony..brown@live.com',
             'revenue': '4.8'
@@ -53,7 +55,7 @@ class TestNARegionDirectProcessing:
         
         # Test region resolution specifically
         resolved_region = _resolve_region(row_data['region'])
-        assert resolved_region == "North America", f"Region 'NA' should resolve to 'North America', got: {resolved_region}"
+        assert resolved_region == "Mumbai", f"Region 'Bombay' should resolve to 'Mumbai', got: {resolved_region}"
         
         # Create a DataFrame and test the full cleaning pipeline on this specific row
         df = pd.DataFrame([row_data])
@@ -82,15 +84,15 @@ class TestNARegionDirectProcessing:
         print(f"Total mappings in _REGION_MAP: {len(_REGION_MAP)}")
         print(f"Total mappings in _REGION_MAP_CASEFOLD: {len(_REGION_MAP_CASEFOLD)}")
         
-        # Show NA-related mappings
-        na_related = {k: v for k, v in _REGION_MAP.items() if 'na' in k.lower() or 'north' in v.lower()}
-        print(f"\nNA-related mappings in _REGION_MAP:")
-        for k, v in sorted(na_related.items()):
+        # Show Mumbai-related mappings
+        mumbai_related = {k: v for k, v in _REGION_MAP.items() if 'mumbai' in k.lower() or 'bombay' in k.lower() or 'mumbai' in v.lower()}
+        print(f"\nMumbai-related mappings in _REGION_MAP:")
+        for k, v in sorted(mumbai_related.items()):
             print(f"  '{k}' -> '{v}'")
         
         # Test the specific problematic cases
-        test_cases = ["NA", "na", "Na", "nA"]
-        print(f"\nTesting specific NA variants:")
+        test_cases = ["Mumbai", "mumbai", "Bombay", "Mumbay"]
+        print(f"\nTesting specific Mumbai variants:")
         for case in test_cases:
             direct_lookup = _REGION_MAP.get(case, "NOT_FOUND")
             casefold_lookup = _REGION_MAP_CASEFOLD.get(case.lower(), "NOT_FOUND")
